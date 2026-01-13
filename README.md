@@ -97,6 +97,39 @@ Retrieves a list of all business applications currently being monitored in your 
 ]
 ```
 
+### `get_health_violations`
+
+Retrieves health rule violations for a specific application or all applications in your AppDynamics instance.
+
+**Parameters**:
+- `applicationId` (optional, number): The ID of the application to check for health violations. If not provided, checks all applications.
+
+**Returns**: 
+- If `applicationId` is provided: JSON array of health rule violations for that application
+- If `applicationId` is not provided: JSON array of objects containing violations grouped by application:
+```json
+[
+  {
+    "applicationId": 12345,
+    "applicationName": "Application Name",
+    "violations": [
+      {
+        "id": 67890,
+        "name": "Health Rule Name",
+        "severity": "WARN|ERROR|CRITICAL",
+        "affectedEntityType": "APPLICATION_COMPONENT_NODE",
+        "detectedTimeInMillis": 1234567890,
+        "summary": "Violation summary"
+      }
+    ]
+  }
+]
+```
+
+**Example Usage**:
+- Get violations for a specific application: `get_health_violations` with `applicationId: 12345`
+- Get violations for all applications: `get_health_violations` with no parameters
+
 ## Usage
 
 Once configured, you can use the MCP server in Cursor or other MCP-compatible clients:
@@ -105,13 +138,19 @@ Once configured, you can use the MCP server in Cursor or other MCP-compatible cl
 2. The server will automatically authenticate using OAuth2
 3. Use the available tools through the MCP interface
 
-### Example Query
+### Example Queries
 
+**Get all applications:**
 Ask Cursor: "Which applications are currently being monitored in our AppDynamics instance?"
+
+**Check health violations:**
+Ask Cursor: "Are there any health rule violations in our AppDynamics instance?"
+or
+Ask Cursor: "Check for health violations in application ID 12345"
 
 The MCP server will:
 1. Authenticate with AppDynamics using OAuth2
-2. Retrieve the list of applications
+2. Execute the requested query
 3. Return the results in a structured format
 
 ## Development

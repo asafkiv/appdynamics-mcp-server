@@ -85,9 +85,40 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "Retrieve a list of all business applications from AppDynamics",
         inputSchema: { type: "object", properties: {} },
       },
+      {
+        name: "get_health_violations",
+        description: "Retrieve health rule violations for a specific application or all applications. If applicationId is not provided, returns violations for all applications.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            applicationId: {
+              type: "number",
+              description: "Optional: The ID of the application to check for health violations. If not provided, checks all applications.",
+            },
+          },
+        },
+      },
     ],
   };
 });
+
+// Helper function to handle errors
+function handleError(error: unknown): { content: Array<{ type: string; text: string }>; isError: boolean } {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  if (axios.isAxiosError(error)) {
+    const details = error.response 
+      ? `Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`
+      : error.message;
+    return {
+      content: [{ type: "text", text: `Error: ${details}` }],
+      isError: true,
+    };
+  }
+  return {
+    content: [{ type: "text", text: `Error: ${errorMessage}` }],
+    isError: true,
+  };
+}
 
 // 3. Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -102,23 +133,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      // Include more details if it's an axios error
-      if (axios.isAxiosError(error)) {
-        const details = error.response 
-          ? `Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`
-          : error.message;
-        return {
-          content: [{ type: "text", text: `Error: ${details}` }],
-          isError: true,
-        };
-      }
-      return {
-        content: [{ type: "text", text: `Error: ${errorMessage}` }],
-        isError: true,
-      };
+      return handleError(error);
     }
   }
+
+  if (request.params.name === "get_health_violations") {
+    try {
+      const token = await getAccessToken();
+      // Access arguments safely - MCP SDK passes arguments in params.arguments
+      const args = request.params.arguments as { applicationId?: number } | undefined;
+      const applicationId = args?.applicationId;
+
+      if (applicationId) {
+        // Get violations for a specific application
+        const response = await axios.get(
+          `${APPD_URL}/controller/rest/applications/${applicationId}/problems/healthrule-violations?output=JSON`,
+          {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }
+        );
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
+        };
+      } else {
+        // Get violations for all applications
+        // First, get all applications
+        const appsResponse = await axios.get(`${APPD_URL}/controller/rest/applications?output=JSON`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        const applications = appsResponse.data;
+        const allViolations: Array<{ applicationId: number; applicationName: string; violations: any }> = [];
+
+        // Fetch violations for each application
+        for (const app of applications) {
+          try {
+            const violationsResponse = await axios.get(
+              `${APPD_URL}/controller/rest/applications/${app.id}/problems/healthrule-violations?output=JSON`,
+              {
+                headers: { 'Authorization': `Bearer ${token}` }
+              }
+            );
+
+            if (violationsResponse.data && violationsResponse.data.length > 0) {
+              allViolations.push({
+                applicationId: app.id,
+                applicationName: app.name,
+                violations: violationsResponse.data
+              });
+            }
+          } catch (error) {
+            // Log but continue with other applications
+            console.error(`Error fetching violations for application ${app.id}:`, error);
+          }
+        }
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(allViolations, null, 2) }],
+        };
+      }
+    } catch (error) {
+      return handleError(error);
+    }
+  }
+
   throw new Error("Tool not found");
 });
 
