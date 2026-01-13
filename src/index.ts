@@ -5,8 +5,71 @@ import axios from "axios";
 
 // 1. Setup credentials
 const APPD_URL = "https://experience.saas.appdynamics.com"; 
-const APPD_CLIENT_NAME = process.env.APPD_CLIENT_NAME; // API Client Name (key name)
-const APPD_CLIENT_SECRET = process.env.APPD_CLIENT_SECRET; // API Client Secret (long string)
+const CLIENT_NAME = process.env.APPD_CLIENT_NAME || process.env.APPD_API_KEY; // Client name or API key
+const CLIENT_SECRET = process.env.APPD_CLIENT_SECRET;
+const ACCOUNT_NAME = process.env.APPD_ACCOUNT_NAME; // Optional account name for client_id format
+
+// Cache for OAuth token
+let accessToken: string | null = null;
+let tokenExpiry: number = 0;
+
+// Function to get OAuth access token
+async function getAccessToken(): Promise<string> {
+  // Debug: Check if credentials are available
+  if (!CLIENT_NAME || !CLIENT_SECRET) {
+    console.error(`Missing credentials - CLIENT_NAME: ${CLIENT_NAME ? 'set' : 'missing'}, CLIENT_SECRET: ${CLIENT_SECRET ? 'set' : 'missing'}`);
+  }
+  
+  // If we have a valid cached token, return it
+  if (accessToken && Date.now() < tokenExpiry) {
+    return accessToken;
+  }
+
+  // Try OAuth2 client credentials flow first
+  if (CLIENT_NAME && CLIENT_SECRET) {
+    try {
+      // Format client_id as <clientName>@<accountName> if account name is provided
+      const clientId = ACCOUNT_NAME ? `${CLIENT_NAME}@${ACCOUNT_NAME}` : CLIENT_NAME;
+      
+      const response = await axios.post(
+        `${APPD_URL}/controller/api/oauth/access_token`,
+        new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: CLIENT_SECRET
+        }),
+        {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        }
+      );
+      
+      const token = response.data.access_token;
+      if (!token) {
+        throw new Error('No access token received from OAuth endpoint');
+      }
+      accessToken = token;
+      // Set expiry to 5 minutes before actual expiry for safety
+      tokenExpiry = Date.now() + (response.data.expires_in - 300) * 1000;
+      return token;
+    } catch (error) {
+      // Log OAuth error for debugging
+      if (axios.isAxiosError(error)) {
+        const errorDetails = error.response 
+          ? `Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`
+          : error.message;
+        console.error(`OAuth authentication failed: ${errorDetails}`);
+      }
+      // If OAuth fails, fall through to API key method
+    }
+  }
+
+  // Fallback: use API key directly if OAuth not configured
+  if (CLIENT_NAME && !CLIENT_SECRET) {
+    return CLIENT_NAME;
+  }
+
+  throw new Error('AppDynamics authentication not configured. Please set APPD_CLIENT_NAME and APPD_CLIENT_SECRET, or APPD_API_KEY.');
+}
 
 const server = new Server(
   { name: "appdynamics-mcp", version: "1.0.0" },
@@ -26,57 +89,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-// Helper function to get OAuth token
-async function getOAuthToken(): Promise<string> {
-  if (!APPD_CLIENT_NAME || !APPD_CLIENT_SECRET) {
-    throw new Error("APPD_CLIENT_NAME and APPD_CLIENT_SECRET must be set");
-  }
-
-  // Create Basic Auth header: base64(client_name:client_secret)
-  const credentials = Buffer.from(`${APPD_CLIENT_NAME}:${APPD_CLIENT_SECRET}`).toString('base64');
-  
-  const response = await axios.post(
-    `${APPD_URL}/controller/api/oauth/access_token`,
-    'grant_type=client_credentials',
-    {
-      headers: {
-        'Authorization': `Basic ${credentials}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      }
-    }
-  );
-
-  return response.data.access_token;
-}
-
 // 3. Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "get_applications") {
     try {
-      // First, get OAuth token using client credentials
-      const accessToken = await getOAuthToken();
-
-      // Then use the token to make the API call
+      const token = await getAccessToken();
       const response = await axios.get(`${APPD_URL}/controller/rest/applications?output=JSON`, {
-        headers: { 
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       return {
         content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
       };
-    } catch (error: unknown) {
+    } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const statusCode = axios.isAxiosError(error) ? error.response?.status : 'unknown';
-      const errorDetails = axios.isAxiosError(error) ? JSON.stringify(error.response?.data) : '';
-      
+      // Include more details if it's an axios error
+      if (axios.isAxiosError(error)) {
+        const details = error.response 
+          ? `Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`
+          : error.message;
+        return {
+          content: [{ type: "text", text: `Error: ${details}` }],
+          isError: true,
+        };
+      }
       return {
-        content: [{ 
-          type: "text", 
-          text: `Error (${statusCode}): ${errorMessage}${errorDetails ? '\nDetails: ' + errorDetails : ''}` 
-        }],
+        content: [{ type: "text", text: `Error: ${errorMessage}` }],
         isError: true,
       };
     }

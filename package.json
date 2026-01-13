@@ -4,20 +4,12 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
-    "start": "tsx src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [
-    "mcp",
-    "model-context-protocol",
-    "appdynamics",
-    "monitoring",
-    "api"
-  ],
+  "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Model Context Protocol server for AppDynamics integration",
+  "description": "",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
     "axios": "^1.13.2",
