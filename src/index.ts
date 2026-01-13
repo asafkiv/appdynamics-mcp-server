@@ -149,7 +149,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let response;
         try {
           response = await axios.get(
-            `${APPD_URL}/controller/rest/applications/${applicationId}/problems/healthrule-violations?output=JSON`,
+            `${APPD_URL}/controller/rest/applications/${applicationId}/problems/healthrule-violations?time-range-type=BEFORE_NOW&duration-in-mins=1440&output=JSON`,
             {
               headers: { 'Authorization': `Bearer ${token}` }
             }
@@ -158,7 +158,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           // If healthrule-violations fails, try the general problems endpoint
           if (axios.isAxiosError(error) && error.response?.status === 404) {
             response = await axios.get(
-              `${APPD_URL}/controller/rest/applications/${applicationId}/problems?output=JSON`,
+              `${APPD_URL}/controller/rest/applications/${applicationId}/problems?time-range-type=BEFORE_NOW&duration-in-mins=1440&output=JSON`,
               {
                 headers: { 'Authorization': `Bearer ${token}` }
               }
@@ -208,7 +208,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             let violationsResponse;
             try {
               violationsResponse = await axios.get(
-                `${APPD_URL}/controller/rest/applications/${app.id}/problems/healthrule-violations?output=JSON`,
+                `${APPD_URL}/controller/rest/applications/${app.id}/problems/healthrule-violations?time-range-type=BEFORE_NOW&duration-in-mins=1440&output=JSON`,
                 {
                   headers: { 'Authorization': `Bearer ${token}` }
                 }
@@ -217,7 +217,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               // If healthrule-violations fails, try the general problems endpoint
               if (axios.isAxiosError(error) && error.response?.status === 404) {
                 violationsResponse = await axios.get(
-                  `${APPD_URL}/controller/rest/applications/${app.id}/problems?output=JSON`,
+                  `${APPD_URL}/controller/rest/applications/${app.id}/problems?time-range-type=BEFORE_NOW&duration-in-mins=1440&output=JSON`,
                   {
                     headers: { 'Authorization': `Bearer ${token}` }
                   }
