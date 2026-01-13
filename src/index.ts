@@ -146,15 +146,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       if (applicationId) {
         // Get violations for a specific application
-        const response = await axios.get(
-          `${APPD_URL}/controller/rest/applications/${applicationId}/problems/healthrule-violations?output=JSON`,
-          {
-            headers: { 'Authorization': `Bearer ${token}` }
+        let response;
+        try {
+          response = await axios.get(
+            `${APPD_URL}/controller/rest/applications/${applicationId}/problems/healthrule-violations?output=JSON`,
+            {
+              headers: { 'Authorization': `Bearer ${token}` }
+            }
+          );
+        } catch (error) {
+          // If healthrule-violations fails, try the general problems endpoint
+          if (axios.isAxiosError(error) && error.response?.status === 404) {
+            response = await axios.get(
+              `${APPD_URL}/controller/rest/applications/${applicationId}/problems?output=JSON`,
+              {
+                headers: { 'Authorization': `Bearer ${token}` }
+              }
+            );
+          } else {
+            throw error;
           }
-        );
+        }
+
+        // Handle different response formats
+        let violations = response.data;
+        if (violations && typeof violations === 'object' && !Array.isArray(violations)) {
+          if (violations.healthRuleViolations) {
+            violations = violations.healthRuleViolations;
+          } else if (violations.violations) {
+            violations = violations.violations;
+          } else if (violations.data) {
+            violations = violations.data;
+          }
+          // If it's a problems array, filter for health rule violations
+          else if (Array.isArray(violations.problems)) {
+            violations = violations.problems.filter((p: any) => 
+              p.type === 'HEALTH_RULE_VIOLATION' || 
+              p.triggeredEntityType === 'HEALTH_RULE' ||
+              p.name?.toLowerCase().includes('health')
+            );
+          }
+        }
 
         return {
-          content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(violations, null, 2) }],
         };
       } else {
         // Get violations for all applications
@@ -169,23 +204,74 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Fetch violations for each application
         for (const app of applications) {
           try {
-            const violationsResponse = await axios.get(
-              `${APPD_URL}/controller/rest/applications/${app.id}/problems/healthrule-violations?output=JSON`,
-              {
-                headers: { 'Authorization': `Bearer ${token}` }
+            // Try the healthrule-violations endpoint first
+            let violationsResponse;
+            try {
+              violationsResponse = await axios.get(
+                `${APPD_URL}/controller/rest/applications/${app.id}/problems/healthrule-violations?output=JSON`,
+                {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                }
+              );
+            } catch (error) {
+              // If healthrule-violations fails, try the general problems endpoint
+              if (axios.isAxiosError(error) && error.response?.status === 404) {
+                violationsResponse = await axios.get(
+                  `${APPD_URL}/controller/rest/applications/${app.id}/problems?output=JSON`,
+                  {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                  }
+                );
+              } else {
+                throw error;
               }
-            );
+            }
 
-            if (violationsResponse.data && violationsResponse.data.length > 0) {
+            // Handle different response formats
+            let violations = violationsResponse.data;
+            
+            // If response is an object, check for common property names
+            if (violations && typeof violations === 'object' && !Array.isArray(violations)) {
+              // Check for nested arrays or objects
+              if (violations.healthRuleViolations) {
+                violations = violations.healthRuleViolations;
+              } else if (violations.violations) {
+                violations = violations.violations;
+              } else if (violations.data) {
+                violations = violations.data;
+              }
+              // If it's a problems array, filter for health rule violations
+              else if (Array.isArray(violations.problems)) {
+                violations = violations.problems.filter((p: any) => 
+                  p.type === 'HEALTH_RULE_VIOLATION' || 
+                  p.triggeredEntityType === 'HEALTH_RULE' ||
+                  p.name?.toLowerCase().includes('health')
+                );
+              }
+            }
+
+            // Check if we have violations (array with items or non-empty object)
+            const hasViolations = Array.isArray(violations) 
+              ? violations.length > 0 
+              : violations && Object.keys(violations).length > 0;
+
+            if (hasViolations) {
               allViolations.push({
                 applicationId: app.id,
                 applicationName: app.name,
-                violations: violationsResponse.data
+                violations: Array.isArray(violations) ? violations : [violations]
               });
             }
           } catch (error) {
             // Log but continue with other applications
-            console.error(`Error fetching violations for application ${app.id}:`, error);
+            if (axios.isAxiosError(error) && error.response?.status === 404) {
+              // 404 means no violations endpoint or no violations - this is normal
+              continue;
+            }
+            console.error(`Error fetching violations for application ${app.id} (${app.name}):`, 
+              axios.isAxiosError(error) && error.response 
+                ? `Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`
+                : error instanceof Error ? error.message : String(error));
           }
         }
 
