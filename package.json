@@ -4,7 +4,9 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "monitor": "tsx src/monitor.ts",
+    "start:monitor": "tsx src/monitor.ts"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +15,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
     "axios": "^1.13.2",
+    "dotenv": "^16.4.5",
     "zod": "^4.3.5"
   },
   "devDependencies": {

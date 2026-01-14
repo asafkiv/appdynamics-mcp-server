@@ -235,6 +235,89 @@ ISC
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Background Monitoring Service
+
+The project includes a background monitoring service that automatically:
+- Checks for new health rule violations at regular intervals
+- Creates Jira tickets for new violations
+- Updates Jira tickets to "Done" when violations are resolved
+
+### Running the Monitor
+
+1. **Set up environment variables:**
+
+Create a `.env` file or set the following environment variables:
+
+```bash
+# AppDynamics credentials
+APPD_CLIENT_NAME=your_client_name
+APPD_CLIENT_SECRET=your_client_secret
+APPD_ACCOUNT_NAME=your_account_name  # Optional
+
+# Jira credentials
+JIRA_URL=https://your-instance.atlassian.net
+JIRA_USERNAME=your-email@example.com
+JIRA_TOKEN=your_jira_api_token
+JIRA_PROJECT_KEY=TAF  # Project key where tickets will be created
+
+# Monitoring configuration (optional)
+CHECK_INTERVAL_MS=60000  # Check interval in milliseconds (default: 60000 = 1 minute)
+```
+
+2. **Run the monitor:**
+
+```bash
+npm run monitor
+```
+
+Or using tsx directly:
+
+```bash
+npx tsx src/monitor.ts
+```
+
+### How It Works
+
+- The monitor checks for health violations every minute (configurable via `CHECK_INTERVAL_MS`)
+- When a new violation is detected (new incident ID), it creates a Jira ticket
+- When a violation is resolved (status changes to CANCELLED or disappears), it updates the corresponding Jira ticket to "Done"
+- The monitor maintains state in `violations-state.json` to track which violations have tickets
+
+### State Management
+
+The monitor saves its state to `violations-state.json` to track:
+- Which violations have Jira tickets
+- The current status of each violation
+- Last check timestamp
+
+This file is automatically created and updated. It's excluded from git (see `.gitignore`).
+
+### Running as a Service
+
+To run the monitor as a background service:
+
+**Windows (using PM2):**
+```bash
+npm install -g pm2
+pm2 start npm --name "appd-monitor" -- run monitor
+pm2 save
+pm2 startup
+```
+
+**Linux/Mac (using PM2):**
+```bash
+npm install -g pm2
+pm2 start npm --name "appd-monitor" -- run monitor
+pm2 save
+pm2 startup
+```
+
+**Windows Service (using node-windows):**
+```bash
+npm install -g node-windows
+# Follow node-windows documentation to create a service
+```
+
 ## Support
 
 For issues related to:
