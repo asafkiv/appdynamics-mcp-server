@@ -64,3 +64,5 @@ Health violations fetching has multiple fallback layers:
 - Target: ES2022, Module resolution: Node16
 - AppDynamics base URL is hardcoded to `https://experience.saas.appdynamics.com` (SaaS only)
 - Jira integration uses Basic auth (base64-encoded `username:token`)
+
+- always update README.MD when adding new capabilites or fixing bugs

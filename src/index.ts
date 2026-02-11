@@ -135,6 +135,98 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "get_tiers_and_nodes",
+        description: "Retrieve the tiers and nodes (infrastructure topology) for a given application.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            applicationId: {
+              type: "number",
+              description: "The ID of the application.",
+            },
+          },
+          required: ["applicationId"],
+        },
+      },
+      {
+        name: "get_snapshots",
+        description: "Retrieve transaction snapshots (slow, error, stall) for an application. Snapshots provide deep diagnostic details for individual requests.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            applicationId: {
+              type: "number",
+              description: "The ID of the application.",
+            },
+            durationInMins: {
+              type: "number",
+              description: "Optional: Time range in minutes to look back. Defaults to 30.",
+            },
+            guids: {
+              type: "string",
+              description: "Optional: Comma-separated request GUIDs to retrieve specific snapshots.",
+            },
+            "data-collector-name": {
+              type: "string",
+              description: "Optional: Filter by data collector name.",
+            },
+            "data-collector-type": {
+              type: "string",
+              description: "Optional: Filter by data collector type.",
+            },
+            "data-collector-value": {
+              type: "string",
+              description: "Optional: Filter by data collector value.",
+            },
+            maxResults: {
+              type: "number",
+              description: "Optional: Maximum number of snapshots to return. Defaults to 20.",
+            },
+          },
+          required: ["applicationId"],
+        },
+      },
+      {
+        name: "get_errors",
+        description: "Retrieve error and exception events for an application. Useful for root-cause analysis of failures.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            applicationId: {
+              type: "number",
+              description: "The ID of the application.",
+            },
+            durationInMins: {
+              type: "number",
+              description: "Optional: Time range in minutes to look back. Defaults to 60.",
+            },
+          },
+          required: ["applicationId"],
+        },
+      },
+      {
+        name: "get_metric_data",
+        description: "Retrieve any metric data from AppDynamics using a metric path. This is a generic tool that can query any metric in the AppDynamics metric tree (infrastructure, custom metrics, etc.).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            applicationId: {
+              type: "number",
+              description: "The ID of the application.",
+            },
+            metricPath: {
+              type: "string",
+              description: "The metric path to query (e.g. 'Overall Application Performance|Average Response Time (ms)', 'Application Infrastructure Performance|*|Hardware Resources|CPU|%Busy').",
+            },
+            durationInMins: {
+              type: "number",
+              description: "Optional: Time range in minutes to look back. Defaults to 60.",
+            },
+          },
+          required: ["applicationId", "metricPath"],
+        },
+      },
+      {
         name: "get_anomalies",
         description: "Retrieve anomaly detection events for a specific application or all applications. Returns events such as anomaly openings, closings, upgrades, and downgrades.",
         inputSchema: {
@@ -416,6 +508,143 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       return {
         content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+      };
+    } catch (error) {
+      return handleError(error);
+    }
+  }
+
+  if (request.params.name === "get_tiers_and_nodes") {
+    try {
+      const token = await getAccessToken();
+      const args = request.params.arguments as { applicationId: number };
+      const headers = { 'Authorization': `Bearer ${token}` };
+
+      // Fetch tiers and nodes in parallel
+      const [tiersResponse, nodesResponse] = await Promise.all([
+        axios.get(
+          `${APPD_URL}/controller/rest/applications/${args.applicationId}/tiers?output=JSON`,
+          { headers }
+        ),
+        axios.get(
+          `${APPD_URL}/controller/rest/applications/${args.applicationId}/nodes?output=JSON`,
+          { headers }
+        ),
+      ]);
+
+      // Group nodes by tier
+      const nodesByTier: Record<number, any[]> = {};
+      for (const node of nodesResponse.data) {
+        const tierId = node.tierId;
+        if (!nodesByTier[tierId]) nodesByTier[tierId] = [];
+        nodesByTier[tierId].push(node);
+      }
+
+      const result = tiersResponse.data.map((tier: any) => ({
+        ...tier,
+        nodes: nodesByTier[tier.id] || [],
+      }));
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (error) {
+      return handleError(error);
+    }
+  }
+
+  if (request.params.name === "get_snapshots") {
+    try {
+      const token = await getAccessToken();
+      const args = request.params.arguments as {
+        applicationId: number;
+        durationInMins?: number;
+        guids?: string;
+        "data-collector-name"?: string;
+        "data-collector-type"?: string;
+        "data-collector-value"?: string;
+        maxResults?: number;
+      };
+      const headers = { 'Authorization': `Bearer ${token}` };
+      const duration = args.durationInMins || 30;
+      const maxResults = args.maxResults || 20;
+
+      const params: Record<string, any> = {
+        "time-range-type": "BEFORE_NOW",
+        "duration-in-mins": duration,
+        "output": "JSON",
+        "maximum-results": maxResults,
+      };
+
+      if (args.guids) params["guids"] = args.guids;
+      if (args["data-collector-name"]) params["data-collector-name"] = args["data-collector-name"];
+      if (args["data-collector-type"]) params["data-collector-type"] = args["data-collector-type"];
+      if (args["data-collector-value"]) params["data-collector-value"] = args["data-collector-value"];
+
+      const response = await axios.get(
+        `${APPD_URL}/controller/rest/applications/${args.applicationId}/request-snapshots`,
+        { params, headers }
+      );
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
+      };
+    } catch (error) {
+      return handleError(error);
+    }
+  }
+
+  if (request.params.name === "get_errors") {
+    try {
+      const token = await getAccessToken();
+      const args = request.params.arguments as { applicationId: number; durationInMins?: number };
+      const duration = args.durationInMins || 60;
+      const headers = { 'Authorization': `Bearer ${token}` };
+
+      const response = await axios.get(
+        `${APPD_URL}/controller/rest/applications/${args.applicationId}/events`,
+        {
+          params: {
+            "time-range-type": "BEFORE_NOW",
+            "duration-in-mins": duration,
+            "event-types": "ERROR,APPLICATION_ERROR,APPLICATION_CRASH",
+            "severities": "ERROR,WARN",
+            "output": "JSON",
+          },
+          headers,
+        }
+      );
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
+      };
+    } catch (error) {
+      return handleError(error);
+    }
+  }
+
+  if (request.params.name === "get_metric_data") {
+    try {
+      const token = await getAccessToken();
+      const args = request.params.arguments as { applicationId: number; metricPath: string; durationInMins?: number };
+      const duration = args.durationInMins || 60;
+      const headers = { 'Authorization': `Bearer ${token}` };
+
+      const response = await axios.get(
+        `${APPD_URL}/controller/rest/applications/${args.applicationId}/metric-data`,
+        {
+          params: {
+            "metric-path": args.metricPath,
+            "time-range-type": "BEFORE_NOW",
+            "duration-in-mins": duration,
+            "output": "JSON",
+          },
+          headers,
+        }
+      );
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
       };
     } catch (error) {
       return handleError(error);

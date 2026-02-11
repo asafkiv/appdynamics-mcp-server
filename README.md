@@ -10,6 +10,10 @@ A Model Context Protocol (MCP) server that provides access to AppDynamics SaaS R
 - **Business Transactions**: Query business transactions and their performance metrics
 - **Health Violations**: Monitor health rule violations across applications
 - **Anomaly Detection**: Query anomaly detection events across applications
+- **Tiers & Nodes**: View application topology — tiers and their nodes
+- **Transaction Snapshots**: Deep diagnostic snapshots for individual requests
+- **Error Analysis**: Query error and exception events for root-cause analysis
+- **Generic Metrics**: Query any metric in the AppDynamics metric tree
 
 ## Prerequisites
 
@@ -201,6 +205,67 @@ Retrieves anomaly detection events for a specific application or all application
 - Get anomalies across all applications: `get_anomalies` with no parameters
 - Get last 4 hours of critical anomalies: `get_anomalies` with `applicationId: 12345, durationInMins: 240, severities: "ERROR"`
 
+### `get_tiers_and_nodes`
+
+Retrieves the tiers and nodes (infrastructure topology) for a given application. Nodes are grouped under their respective tiers.
+
+**Parameters**:
+- `applicationId` (required, number): The ID of the application.
+
+**Returns**: JSON array of tiers, each containing a `nodes` array with the nodes belonging to that tier.
+
+**Example Usage**:
+- Get topology for an application: `get_tiers_and_nodes` with `applicationId: 12345`
+
+### `get_snapshots`
+
+Retrieves transaction snapshots (slow, error, stall) for an application. Snapshots provide deep diagnostic details for individual requests.
+
+**Parameters**:
+- `applicationId` (required, number): The ID of the application.
+- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 30.
+- `guids` (optional, string): Comma-separated request GUIDs to retrieve specific snapshots.
+- `maxResults` (optional, number): Maximum number of snapshots to return. Defaults to 20.
+
+**Example Usage**:
+- Get recent snapshots: `get_snapshots` with `applicationId: 12345`
+- Get last 2 hours of snapshots: `get_snapshots` with `applicationId: 12345, durationInMins: 120`
+
+### `get_errors`
+
+Retrieves error and exception events for an application. Useful for root-cause analysis of failures.
+
+**Parameters**:
+- `applicationId` (required, number): The ID of the application.
+- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 60.
+
+**Returns**: JSON array of error events including `ERROR`, `APPLICATION_ERROR`, and `APPLICATION_CRASH` event types.
+
+**Example Usage**:
+- Get errors in the last hour: `get_errors` with `applicationId: 12345`
+- Get errors in the last 24 hours: `get_errors` with `applicationId: 12345, durationInMins: 1440`
+
+### `get_metric_data`
+
+A generic tool to query any metric in the AppDynamics metric tree. Supports infrastructure metrics, custom metrics, and any other metric path.
+
+**Parameters**:
+- `applicationId` (required, number): The ID of the application.
+- `metricPath` (required, string): The metric path to query.
+- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 60.
+
+**Common metric paths**:
+- `Overall Application Performance|Average Response Time (ms)`
+- `Overall Application Performance|Calls per Minute`
+- `Overall Application Performance|Errors per Minute`
+- `Application Infrastructure Performance|*|Hardware Resources|CPU|%Busy`
+- `Application Infrastructure Performance|*|Hardware Resources|Memory|Used %`
+- `Application Infrastructure Performance|*|JVM|Garbage Collection|GC Time Spent per Min (ms)`
+
+**Example Usage**:
+- Get overall app response time: `get_metric_data` with `applicationId: 12345, metricPath: "Overall Application Performance|Average Response Time (ms)"`
+- Get CPU usage across all tiers: `get_metric_data` with `applicationId: 12345, metricPath: "Application Infrastructure Performance|*|Hardware Resources|CPU|%Busy"`
+
 ## Usage
 
 Once configured, you can use the MCP server in Cursor or other MCP-compatible clients:
@@ -231,6 +296,18 @@ Ask Cursor: "How is the response time for BT 67890 over the last 24 hours?"
 Ask Cursor: "Are there any anomalies detected across our applications?"
 or
 Ask Cursor: "Show me anomalies for application 12345 in the last 4 hours"
+
+**View application topology:**
+Ask Cursor: "Show me the tiers and nodes for application 12345"
+
+**Investigate snapshots:**
+Ask Cursor: "Get me the latest transaction snapshots for application 12345"
+
+**Check errors:**
+Ask Cursor: "What errors occurred in application 12345 in the last 24 hours?"
+
+**Query custom metrics:**
+Ask Cursor: "What's the CPU usage across all tiers in application 12345?"
 
 The MCP server will:
 1. Authenticate with AppDynamics using OAuth2
