@@ -4,7 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import axios from "axios";
 
 // 1. Setup credentials
-const APPD_URL = "https://experience.saas.appdynamics.com"; 
+const APPD_URL = process.env.APPD_URL ;
 const CLIENT_NAME = process.env.APPD_CLIENT_NAME || process.env.APPD_API_KEY; // Client name or API key
 const CLIENT_SECRET = process.env.APPD_CLIENT_SECRET;
 const ACCOUNT_NAME = process.env.APPD_ACCOUNT_NAME; // Optional account name for client_id format
@@ -96,6 +96,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Optional: The ID of the application to check for health violations. If not provided, checks all applications.",
             },
           },
+        },
+      },
+      {
+        name: "get_business_transactions",
+        description: "Retrieve a list of all business transactions for a given application.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            applicationId: {
+              type: "number",
+              description: "The ID of the application to retrieve business transactions for.",
+            },
+          },
+          required: ["applicationId"],
+        },
+      },
+      {
+        name: "get_bt_performance",
+        description: "Retrieve performance metrics (average response time, calls per minute, errors per minute) for a specific business transaction.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            applicationId: {
+              type: "number",
+              description: "The ID of the application.",
+            },
+            btId: {
+              type: "number",
+              description: "The ID of the business transaction.",
+            },
+            durationInMins: {
+              type: "number",
+              description: "Optional: Time range in minutes to look back. Defaults to 60 (last hour).",
+            },
+          },
+          required: ["applicationId", "btId"],
         },
       },
     ],
@@ -279,6 +315,129 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [{ type: "text", text: JSON.stringify(allViolations, null, 2) }],
         };
       }
+    } catch (error) {
+      return handleError(error);
+    }
+  }
+
+  if (request.params.name === "get_business_transactions") {
+    try {
+      const token = await getAccessToken();
+      const args = request.params.arguments as { applicationId: number };
+      const response = await axios.get(
+        `${APPD_URL}/controller/rest/applications/${args.applicationId}/business-transactions?output=JSON`,
+        {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }
+      );
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
+      };
+    } catch (error) {
+      return handleError(error);
+    }
+  }
+
+  if (request.params.name === "get_bt_performance") {
+    try {
+      const token = await getAccessToken();
+      const args = request.params.arguments as { applicationId: number; btId: number; durationInMins?: number };
+      const duration = args.durationInMins || 60;
+
+      const metricNames = [
+        "Average Response Time (ms)",
+        "Calls per Minute",
+        "Errors per Minute",
+        "Number of Slow Calls",
+        "Number of Very Slow Calls",
+        "Stall Count",
+      ];
+
+      const results: Record<string, any> = {};
+
+      for (const metric of metricNames) {
+        try {
+          const response = await axios.get(
+            `${APPD_URL}/controller/rest/applications/${args.applicationId}/metric-data`,
+            {
+              params: {
+                "metric-path": `Business Transaction Performance|Business Transactions|*|*|${metric}`,
+                "time-range-type": "BEFORE_NOW",
+                "duration-in-mins": duration,
+                "output": "JSON",
+              },
+              headers: { 'Authorization': `Bearer ${token}` }
+            }
+          );
+
+          // Filter metrics to the requested BT by matching the btId in the path
+          const allMetrics = response.data;
+          if (Array.isArray(allMetrics)) {
+            const btMetric = allMetrics.find((m: any) => {
+              const path: string = m.metricPath || "";
+              return path.includes(`BT:${args.btId}`);
+            });
+            if (btMetric) {
+              results[metric] = btMetric;
+            }
+          }
+        } catch {
+          // Skip metrics that fail
+        }
+      }
+
+      // If path-based filtering didn't match, try the BT-specific endpoint
+      if (Object.keys(results).length === 0) {
+        // Get the BT details first to find its name and tier
+        const btListResponse = await axios.get(
+          `${APPD_URL}/controller/rest/applications/${args.applicationId}/business-transactions?output=JSON`,
+          {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }
+        );
+
+        const bt = btListResponse.data.find((b: any) => b.id === args.btId);
+        if (!bt) {
+          return {
+            content: [{ type: "text", text: `Business transaction with ID ${args.btId} not found.` }],
+            isError: true,
+          };
+        }
+
+        for (const metric of metricNames) {
+          try {
+            const response = await axios.get(
+              `${APPD_URL}/controller/rest/applications/${args.applicationId}/metric-data`,
+              {
+                params: {
+                  "metric-path": `Business Transaction Performance|Business Transactions|${bt.tierName}|${bt.name}|${metric}`,
+                  "time-range-type": "BEFORE_NOW",
+                  "duration-in-mins": duration,
+                  "output": "JSON",
+                },
+                headers: { 'Authorization': `Bearer ${token}` }
+              }
+            );
+            if (response.data && response.data.length > 0) {
+              results[metric] = response.data[0];
+            }
+          } catch {
+            // Skip metrics that fail
+          }
+        }
+
+        results["businessTransaction"] = {
+          id: bt.id,
+          name: bt.name,
+          tierName: bt.tierName,
+          entryPointType: bt.entryPointType,
+        };
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+      };
     } catch (error) {
       return handleError(error);
     }
