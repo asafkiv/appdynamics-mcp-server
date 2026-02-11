@@ -134,6 +134,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["applicationId", "btId"],
         },
       },
+      {
+        name: "get_anomalies",
+        description: "Retrieve anomaly detection events for a specific application or all applications. Returns events such as anomaly openings, closings, upgrades, and downgrades.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            applicationId: {
+              type: "number",
+              description: "Optional: The ID of the application. If not provided, checks all applications.",
+            },
+            durationInMins: {
+              type: "number",
+              description: "Optional: Time range in minutes to look back. Defaults to 1440 (last 24 hours).",
+            },
+            severities: {
+              type: "string",
+              description: "Optional: Comma-separated severity levels to include. Defaults to 'INFO,WARN,ERROR'.",
+            },
+          },
+        },
+      },
     ],
   };
 });
@@ -235,81 +256,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
 
         const applications = appsResponse.data;
-        const allViolations: Array<{ applicationId: number; applicationName: string; violations: any }> = [];
+        const headers = { 'Authorization': `Bearer ${token}` };
 
-        // Fetch violations for each application
-        for (const app of applications) {
+        // Helper to fetch and parse violations for a single app
+        async function fetchAppViolations(app: any) {
           try {
-            // Try the healthrule-violations endpoint first
             let violationsResponse;
             try {
               violationsResponse = await axios.get(
                 `${APPD_URL}/controller/rest/applications/${app.id}/problems/healthrule-violations?time-range-type=BEFORE_NOW&duration-in-mins=1440&output=JSON`,
-                {
-                  headers: { 'Authorization': `Bearer ${token}` }
-                }
+                { headers }
               );
             } catch (error) {
-              // If healthrule-violations fails, try the general problems endpoint
               if (axios.isAxiosError(error) && error.response?.status === 404) {
                 violationsResponse = await axios.get(
                   `${APPD_URL}/controller/rest/applications/${app.id}/problems?time-range-type=BEFORE_NOW&duration-in-mins=1440&output=JSON`,
-                  {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                  }
+                  { headers }
                 );
               } else {
                 throw error;
               }
             }
 
-            // Handle different response formats
             let violations = violationsResponse.data;
-            
-            // If response is an object, check for common property names
             if (violations && typeof violations === 'object' && !Array.isArray(violations)) {
-              // Check for nested arrays or objects
               if (violations.healthRuleViolations) {
                 violations = violations.healthRuleViolations;
               } else if (violations.violations) {
                 violations = violations.violations;
               } else if (violations.data) {
                 violations = violations.data;
-              }
-              // If it's a problems array, filter for health rule violations
-              else if (Array.isArray(violations.problems)) {
-                violations = violations.problems.filter((p: any) => 
-                  p.type === 'HEALTH_RULE_VIOLATION' || 
+              } else if (Array.isArray(violations.problems)) {
+                violations = violations.problems.filter((p: any) =>
+                  p.type === 'HEALTH_RULE_VIOLATION' ||
                   p.triggeredEntityType === 'HEALTH_RULE' ||
                   p.name?.toLowerCase().includes('health')
                 );
               }
             }
 
-            // Check if we have violations (array with items or non-empty object)
-            const hasViolations = Array.isArray(violations) 
-              ? violations.length > 0 
+            const hasViolations = Array.isArray(violations)
+              ? violations.length > 0
               : violations && Object.keys(violations).length > 0;
 
             if (hasViolations) {
-              allViolations.push({
+              return {
                 applicationId: app.id,
                 applicationName: app.name,
                 violations: Array.isArray(violations) ? violations : [violations]
-              });
+              };
             }
           } catch (error) {
-            // Log but continue with other applications
             if (axios.isAxiosError(error) && error.response?.status === 404) {
-              // 404 means no violations endpoint or no violations - this is normal
-              continue;
+              return null;
             }
-            console.error(`Error fetching violations for application ${app.id} (${app.name}):`, 
-              axios.isAxiosError(error) && error.response 
+            console.error(`Error fetching violations for application ${app.id} (${app.name}):`,
+              axios.isAxiosError(error) && error.response
                 ? `Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`
                 : error instanceof Error ? error.message : String(error));
           }
+          return null;
         }
+
+        // Fetch violations for all applications in parallel
+        const violationResults = await Promise.all(applications.map(fetchAppViolations));
+        const allViolations = violationResults.filter((v): v is NonNullable<typeof v> => v !== null);
 
         return {
           content: [{ type: "text", text: JSON.stringify(allViolations, null, 2) }],
@@ -344,6 +355,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const token = await getAccessToken();
       const args = request.params.arguments as { applicationId: number; btId: number; durationInMins?: number };
       const duration = args.durationInMins || 60;
+      const headers = { 'Authorization': `Bearer ${token}` };
+
+      // Get the BT details first to build exact metric paths
+      const btListResponse = await axios.get(
+        `${APPD_URL}/controller/rest/applications/${args.applicationId}/business-transactions?output=JSON`,
+        { headers }
+      );
+
+      const bt = btListResponse.data.find((b: any) => b.id === args.btId);
+      if (!bt) {
+        return {
+          content: [{ type: "text", text: `Business transaction with ID ${args.btId} not found.` }],
+          isError: true,
+        };
+      }
 
       const metricNames = [
         "Average Response Time (ms)",
@@ -354,90 +380,107 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         "Stall Count",
       ];
 
-      const results: Record<string, any> = {};
-
-      for (const metric of metricNames) {
-        try {
-          const response = await axios.get(
-            `${APPD_URL}/controller/rest/applications/${args.applicationId}/metric-data`,
-            {
-              params: {
-                "metric-path": `Business Transaction Performance|Business Transactions|*|*|${metric}`,
-                "time-range-type": "BEFORE_NOW",
-                "duration-in-mins": duration,
-                "output": "JSON",
-              },
-              headers: { 'Authorization': `Bearer ${token}` }
-            }
-          );
-
-          // Filter metrics to the requested BT by matching the btId in the path
-          const allMetrics = response.data;
-          if (Array.isArray(allMetrics)) {
-            const btMetric = allMetrics.find((m: any) => {
-              const path: string = m.metricPath || "";
-              return path.includes(`BT:${args.btId}`);
-            });
-            if (btMetric) {
-              results[metric] = btMetric;
-            }
-          }
-        } catch {
-          // Skip metrics that fail
-        }
-      }
-
-      // If path-based filtering didn't match, try the BT-specific endpoint
-      if (Object.keys(results).length === 0) {
-        // Get the BT details first to find its name and tier
-        const btListResponse = await axios.get(
-          `${APPD_URL}/controller/rest/applications/${args.applicationId}/business-transactions?output=JSON`,
+      // Fetch all metrics in parallel using exact BT path
+      const metricPromises = metricNames.map(metric =>
+        axios.get(
+          `${APPD_URL}/controller/rest/applications/${args.applicationId}/metric-data`,
           {
-            headers: { 'Authorization': `Bearer ${token}` }
+            params: {
+              "metric-path": `Business Transaction Performance|Business Transactions|${bt.tierName}|${bt.name}|${metric}`,
+              "time-range-type": "BEFORE_NOW",
+              "duration-in-mins": duration,
+              "output": "JSON",
+            },
+            headers
           }
-        );
+        ).then(response => ({ metric, data: response.data }))
+         .catch(() => null)
+      );
 
-        const bt = btListResponse.data.find((b: any) => b.id === args.btId);
-        if (!bt) {
-          return {
-            content: [{ type: "text", text: `Business transaction with ID ${args.btId} not found.` }],
-            isError: true,
-          };
-        }
+      const metricResults = await Promise.all(metricPromises);
 
-        for (const metric of metricNames) {
-          try {
-            const response = await axios.get(
-              `${APPD_URL}/controller/rest/applications/${args.applicationId}/metric-data`,
-              {
-                params: {
-                  "metric-path": `Business Transaction Performance|Business Transactions|${bt.tierName}|${bt.name}|${metric}`,
-                  "time-range-type": "BEFORE_NOW",
-                  "duration-in-mins": duration,
-                  "output": "JSON",
-                },
-                headers: { 'Authorization': `Bearer ${token}` }
-              }
-            );
-            if (response.data && response.data.length > 0) {
-              results[metric] = response.data[0];
-            }
-          } catch {
-            // Skip metrics that fail
-          }
-        }
-
-        results["businessTransaction"] = {
+      const results: Record<string, any> = {
+        businessTransaction: {
           id: bt.id,
           name: bt.name,
           tierName: bt.tierName,
           entryPointType: bt.entryPointType,
-        };
+        },
+      };
+
+      for (const result of metricResults) {
+        if (result && result.data && result.data.length > 0) {
+          results[result.metric] = result.data[0];
+        }
       }
 
       return {
         content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
       };
+    } catch (error) {
+      return handleError(error);
+    }
+  }
+
+  if (request.params.name === "get_anomalies") {
+    try {
+      const token = await getAccessToken();
+      const args = request.params.arguments as { applicationId?: number; durationInMins?: number; severities?: string } | undefined;
+      const duration = args?.durationInMins || 1440;
+      const severities = args?.severities || "INFO,WARN,ERROR";
+      const eventTypes = "ANOMALY_OPEN_WARNING,ANOMALY_OPEN_CRITICAL,ANOMALY_CLOSE_WARNING,ANOMALY_CLOSE_CRITICAL,ANOMALY_UPGRADED,ANOMALY_DOWNGRADED";
+      const headers = { 'Authorization': `Bearer ${token}` };
+
+      async function fetchAnomalies(appId: number) {
+        const response = await axios.get(
+          `${APPD_URL}/controller/rest/applications/${appId}/events`,
+          {
+            params: {
+              "time-range-type": "BEFORE_NOW",
+              "duration-in-mins": duration,
+              "event-types": eventTypes,
+              "severities": severities,
+              "output": "JSON",
+            },
+            headers,
+          }
+        );
+        return response.data;
+      }
+
+      if (args?.applicationId) {
+        const anomalies = await fetchAnomalies(args.applicationId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(anomalies, null, 2) }],
+        };
+      } else {
+        // Fetch all apps, then anomalies in parallel
+        const appsResponse = await axios.get(`${APPD_URL}/controller/rest/applications?output=JSON`, { headers });
+        const applications = appsResponse.data;
+
+        const results = await Promise.all(
+          applications.map(async (app: any) => {
+            try {
+              const anomalies = await fetchAnomalies(app.id);
+              const events = Array.isArray(anomalies) ? anomalies : [];
+              if (events.length > 0) {
+                return { applicationId: app.id, applicationName: app.name, anomalies: events };
+              }
+            } catch (error) {
+              if (!(axios.isAxiosError(error) && error.response?.status === 404)) {
+                console.error(`Error fetching anomalies for application ${app.id} (${app.name}):`,
+                  error instanceof Error ? error.message : String(error));
+              }
+            }
+            return null;
+          })
+        );
+
+        const allAnomalies = results.filter((r): r is NonNullable<typeof r> => r !== null);
+        return {
+          content: [{ type: "text", text: JSON.stringify(allAnomalies, null, 2) }],
+        };
+      }
     } catch (error) {
       return handleError(error);
     }

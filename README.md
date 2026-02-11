@@ -9,6 +9,7 @@ A Model Context Protocol (MCP) server that provides access to AppDynamics SaaS R
 - **Application Management**: Retrieve lists of all monitored applications in your AppDynamics instance
 - **Business Transactions**: Query business transactions and their performance metrics
 - **Health Violations**: Monitor health rule violations across applications
+- **Anomaly Detection**: Query anomaly detection events across applications
 
 ## Prerequisites
 
@@ -167,6 +168,39 @@ Retrieves performance metrics for a specific business transaction.
 - Get last hour performance: `get_bt_performance` with `applicationId: 12345, btId: 67890`
 - Get last 24h performance: `get_bt_performance` with `applicationId: 12345, btId: 67890, durationInMins: 1440`
 
+### `get_anomalies`
+
+Retrieves anomaly detection events for a specific application or all applications.
+
+**Parameters**:
+- `applicationId` (optional, number): The ID of the application. If not provided, checks all applications.
+- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 1440 (last 24 hours).
+- `severities` (optional, string): Comma-separated severity levels to include. Defaults to `INFO,WARN,ERROR`.
+
+**Returns**: Anomaly events including openings, closings, upgrades, and downgrades. When querying all applications, results are grouped by application:
+```json
+[
+  {
+    "applicationId": 12345,
+    "applicationName": "Application Name",
+    "anomalies": [
+      {
+        "id": 67890,
+        "type": "ANOMALY_OPEN_CRITICAL",
+        "severity": "ERROR",
+        "summary": "Anomaly summary",
+        "eventTime": 1234567890
+      }
+    ]
+  }
+]
+```
+
+**Example Usage**:
+- Get anomalies for a specific application: `get_anomalies` with `applicationId: 12345`
+- Get anomalies across all applications: `get_anomalies` with no parameters
+- Get last 4 hours of critical anomalies: `get_anomalies` with `applicationId: 12345, durationInMins: 240, severities: "ERROR"`
+
 ## Usage
 
 Once configured, you can use the MCP server in Cursor or other MCP-compatible clients:
@@ -193,6 +227,11 @@ Ask Cursor: "Show me the performance metrics for business transaction 67890 in a
 or
 Ask Cursor: "How is the response time for BT 67890 over the last 24 hours?"
 
+**Check anomalies:**
+Ask Cursor: "Are there any anomalies detected across our applications?"
+or
+Ask Cursor: "Show me anomalies for application 12345 in the last 4 hours"
+
 The MCP server will:
 1. Authenticate with AppDynamics using OAuth2
 2. Execute the requested query
@@ -205,8 +244,7 @@ The MCP server will:
 ```
 appd-mcp-server/
 ├── src/
-│   ├── index.ts          # Main MCP server implementation
-│   └── monitor.ts        # Background monitoring service with Jira integration
+│   └── index.ts          # Main MCP server implementation
 ├── package.json          # Dependencies and scripts
 ├── tsconfig.json         # TypeScript configuration
 ├── CLAUDE.md             # Claude Code onboarding guide
@@ -281,90 +319,6 @@ ISC
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Background Monitoring Service
-
-The project includes a background monitoring service that automatically:
-- Checks for new health rule violations at regular intervals
-- Creates Jira tickets for new violations
-- Updates Jira tickets to "Done" when violations are resolved
-
-### Running the Monitor
-
-1. **Set up environment variables:**
-
-Create a `.env` file or set the following environment variables:
-
-```bash
-# AppDynamics credentials
-APPD_URL=https://your-account.saas.appdynamics.com
-APPD_CLIENT_NAME=your_client_name
-APPD_CLIENT_SECRET=your_client_secret
-APPD_ACCOUNT_NAME=your_account_name  # Optional
-
-# Jira credentials
-JIRA_URL=https://your-instance.atlassian.net
-JIRA_USERNAME=your-email@example.com
-JIRA_TOKEN=your_jira_api_token
-JIRA_PROJECT_KEY=TAF  # Project key where tickets will be created
-
-# Monitoring configuration (optional)
-CHECK_INTERVAL_MS=60000  # Check interval in milliseconds (default: 60000 = 1 minute)
-```
-
-2. **Run the monitor:**
-
-```bash
-npm run monitor
-```
-
-Or using tsx directly:
-
-```bash
-npx tsx src/monitor.ts
-```
-
-### How It Works
-
-- The monitor checks for health violations every minute (configurable via `CHECK_INTERVAL_MS`)
-- When a new violation is detected (new incident ID), it creates a Jira ticket
-- When a violation is resolved (status changes to CANCELLED or disappears), it updates the corresponding Jira ticket to "Done"
-- The monitor maintains state in `violations-state.json` to track which violations have tickets
-
-### State Management
-
-The monitor saves its state to `violations-state.json` to track:
-- Which violations have Jira tickets
-- The current status of each violation
-- Last check timestamp
-
-This file is automatically created and updated. It's excluded from git (see `.gitignore`).
-
-### Running as a Service
-
-To run the monitor as a background service:
-
-**Windows (using PM2):**
-```bash
-npm install -g pm2
-pm2 start npm --name "appd-monitor" -- run monitor
-pm2 save
-pm2 startup
-```
-
-**Linux/Mac (using PM2):**
-```bash
-npm install -g pm2
-pm2 start npm --name "appd-monitor" -- run monitor
-pm2 save
-pm2 startup
-```
-
-**Windows Service (using node-windows):**
-```bash
-npm install -g node-windows
-# Follow node-windows documentation to create a service
-```
 
 ## Support
 
