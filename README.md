@@ -7,6 +7,8 @@ A Model Context Protocol (MCP) server that provides access to AppDynamics SaaS R
 - **OAuth2 Authentication**: Secure authentication using AppDynamics OAuth2 client credentials
 - **Token Caching**: Automatic token caching to minimize authentication requests
 - **Application Management**: Retrieve lists of all monitored applications in your AppDynamics instance
+- **Business Transactions**: Query business transactions and their performance metrics
+- **Health Violations**: Monitor health rule violations across applications
 
 ## Prerequisites
 
@@ -51,6 +53,7 @@ Add the following configuration to your Cursor MCP settings file (typically `~/.
         "C:\\TEMP\\AppD-MCP\\appd-mcp-server\\src\\index.ts"
       ],
       "env": {
+        "APPD_URL": "https://your-account.saas.appdynamics.com",
         "APPD_CLIENT_NAME": "your_client_name",
         "APPD_CLIENT_SECRET": "your_client_secret",
         "APPD_ACCOUNT_NAME": "your_account_name"
@@ -60,8 +63,9 @@ Add the following configuration to your Cursor MCP settings file (typically `~/.
 }
 ```
 
-**Note**: 
+**Note**:
 - Update the `command` path to match your installation directory
+- Replace `APPD_URL` with your AppDynamics controller URL (e.g., `https://your-account.saas.appdynamics.com`)
 - Replace `your_client_name`, `your_client_secret`, and `your_account_name` with your actual AppDynamics credentials
 - The `APPD_ACCOUNT_NAME` is optional if your client ID doesn't require the `clientName@accountName` format
 
@@ -130,6 +134,39 @@ Retrieves health rule violations for a specific application or all applications 
 - Get violations for a specific application: `get_health_violations` with `applicationId: 12345`
 - Get violations for all applications: `get_health_violations` with no parameters
 
+### `get_business_transactions`
+
+Retrieves a list of all business transactions for a given application.
+
+**Parameters**:
+- `applicationId` (required, number): The ID of the application to retrieve business transactions for.
+
+**Returns**: JSON array of business transactions with details such as name, tier, entry point type, and ID.
+
+**Example Usage**:
+- Get all BTs for an application: `get_business_transactions` with `applicationId: 12345`
+
+### `get_bt_performance`
+
+Retrieves performance metrics for a specific business transaction.
+
+**Parameters**:
+- `applicationId` (required, number): The ID of the application.
+- `btId` (required, number): The ID of the business transaction.
+- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 60 (last hour).
+
+**Returns**: JSON object containing the following metrics:
+- Average Response Time (ms)
+- Calls per Minute
+- Errors per Minute
+- Number of Slow Calls
+- Number of Very Slow Calls
+- Stall Count
+
+**Example Usage**:
+- Get last hour performance: `get_bt_performance` with `applicationId: 12345, btId: 67890`
+- Get last 24h performance: `get_bt_performance` with `applicationId: 12345, btId: 67890, durationInMins: 1440`
+
 ## Usage
 
 Once configured, you can use the MCP server in Cursor or other MCP-compatible clients:
@@ -148,6 +185,14 @@ Ask Cursor: "Are there any health rule violations in our AppDynamics instance?"
 or
 Ask Cursor: "Check for health violations in application ID 12345"
 
+**List business transactions:**
+Ask Cursor: "What business transactions exist in application 12345?"
+
+**Check BT performance:**
+Ask Cursor: "Show me the performance metrics for business transaction 67890 in application 12345"
+or
+Ask Cursor: "How is the response time for BT 67890 over the last 24 hours?"
+
 The MCP server will:
 1. Authenticate with AppDynamics using OAuth2
 2. Execute the requested query
@@ -160,9 +205,11 @@ The MCP server will:
 ```
 appd-mcp-server/
 ├── src/
-│   └── index.ts          # Main MCP server implementation
+│   ├── index.ts          # Main MCP server implementation
+│   └── monitor.ts        # Background monitoring service with Jira integration
 ├── package.json          # Dependencies and scripts
 ├── tsconfig.json         # TypeScript configuration
+├── CLAUDE.md             # Claude Code onboarding guide
 └── README.md             # This file
 ```
 
@@ -215,7 +262,7 @@ If you encounter `401 Unauthorized` errors:
 ### Connection Issues
 
 If the server fails to connect:
-1. Verify the AppDynamics URL is correct (default: `https://experience.saas.appdynamics.com`)
+1. Verify the `APPD_URL` environment variable is set to your correct controller URL (e.g., `https://your-account.saas.appdynamics.com`)
 2. Check your network connectivity
 3. Verify firewall settings allow outbound HTTPS connections
 
@@ -250,6 +297,7 @@ Create a `.env` file or set the following environment variables:
 
 ```bash
 # AppDynamics credentials
+APPD_URL=https://your-account.saas.appdynamics.com
 APPD_CLIENT_NAME=your_client_name
 APPD_CLIENT_SECRET=your_client_secret
 APPD_ACCOUNT_NAME=your_account_name  # Optional
