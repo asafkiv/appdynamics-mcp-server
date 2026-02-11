@@ -228,7 +228,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_anomalies",
-        description: "Retrieve anomaly detection events for a specific application or all applications. Returns events such as anomaly openings, closings, upgrades, and downgrades.",
+        description: "Retrieve anomaly detection events for a specific application or all applications. By default, returns only currently open anomalies. Set includeAll to true to see all events including closed ones.",
         inputSchema: {
           type: "object",
           properties: {
@@ -243,6 +243,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             severities: {
               type: "string",
               description: "Optional: Comma-separated severity levels to include. Defaults to 'INFO,WARN,ERROR'.",
+            },
+            includeAll: {
+              type: "boolean",
+              description: "Optional: If true, includes all events (opens, closes, upgrades, downgrades). If false (default), returns only currently open anomalies.",
             },
           },
         },
@@ -654,9 +658,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "get_anomalies") {
     try {
       const token = await getAccessToken();
-      const args = request.params.arguments as { applicationId?: number; durationInMins?: number; severities?: string } | undefined;
+      const args = request.params.arguments as { applicationId?: number; durationInMins?: number; severities?: string; includeAll?: boolean } | undefined;
       const duration = args?.durationInMins || 1440;
       const severities = args?.severities || "INFO,WARN,ERROR";
+      const includeAll = args?.includeAll ?? false;
+
+      // Always fetch all event types to properly track open vs closed
       const eventTypes = "ANOMALY_OPEN_WARNING,ANOMALY_OPEN_CRITICAL,ANOMALY_CLOSE_WARNING,ANOMALY_CLOSE_CRITICAL,ANOMALY_UPGRADED,ANOMALY_DOWNGRADED";
       const headers = { 'Authorization': `Bearer ${token}` };
 
@@ -674,7 +681,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             headers,
           }
         );
-        return response.data;
+
+        let events = Array.isArray(response.data) ? response.data : [];
+
+        // If includeAll is false (default), filter to show only currently open anomalies
+        if (!includeAll && events.length > 0) {
+          // Track which anomalies are closed by grouping events by affected entity
+          const anomalyMap = new Map<string, any[]>();
+
+          for (const event of events) {
+            // Create a unique key for each anomaly based on affected entity and summary
+            const key = `${event.affectedEntityType || ''}-${event.affectedEntityId || ''}-${event.affectedEntityName || ''}`;
+            if (!anomalyMap.has(key)) {
+              anomalyMap.set(key, []);
+            }
+            anomalyMap.get(key)!.push(event);
+          }
+
+          // Filter to only show anomalies where the most recent event is NOT a CLOSE
+          const openAnomalies: any[] = [];
+          for (const [key, anomalyEvents] of anomalyMap.entries()) {
+            // Sort events by time (most recent first)
+            anomalyEvents.sort((a, b) => (b.eventTime || 0) - (a.eventTime || 0));
+
+            // Get the most recent event
+            const mostRecent = anomalyEvents[0];
+
+            // Only include if most recent event is OPEN, UPGRADED, or DOWNGRADED (not CLOSE)
+            if (mostRecent.type && !mostRecent.type.includes('CLOSE')) {
+              openAnomalies.push(mostRecent);
+            }
+          }
+
+          events = openAnomalies;
+        }
+
+        return events;
       }
 
       if (args?.applicationId) {

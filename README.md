@@ -174,14 +174,15 @@ Retrieves performance metrics for a specific business transaction.
 
 ### `get_anomalies`
 
-Retrieves anomaly detection events for a specific application or all applications.
+Retrieves anomaly detection events for a specific application or all applications. **By default, returns only currently open anomalies** (filters out anomalies that have been closed).
 
 **Parameters**:
 - `applicationId` (optional, number): The ID of the application. If not provided, checks all applications.
 - `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 1440 (last 24 hours).
 - `severities` (optional, string): Comma-separated severity levels to include. Defaults to `INFO,WARN,ERROR`.
+- `includeAll` (optional, boolean): If `true`, includes all events (opens, closes, upgrades, downgrades). If `false` (default), returns only currently open anomalies by filtering out anomalies where the most recent event is a close.
 
-**Returns**: Anomaly events including openings, closings, upgrades, and downgrades. When querying all applications, results are grouped by application:
+**Returns**: By default, returns only currently open anomaly events. When querying all applications, results are grouped by application:
 ```json
 [
   {
@@ -201,9 +202,10 @@ Retrieves anomaly detection events for a specific application or all application
 ```
 
 **Example Usage**:
-- Get anomalies for a specific application: `get_anomalies` with `applicationId: 12345`
-- Get anomalies across all applications: `get_anomalies` with no parameters
-- Get last 4 hours of critical anomalies: `get_anomalies` with `applicationId: 12345, durationInMins: 240, severities: "ERROR"`
+- Get currently open anomalies for a specific application: `get_anomalies` with `applicationId: 12345`
+- Get all currently open anomalies across all applications: `get_anomalies` with no parameters
+- Get last 4 hours of open critical anomalies: `get_anomalies` with `applicationId: 12345, durationInMins: 240, severities: "ERROR"`
+- Get all anomaly events including closed ones: `get_anomalies` with `applicationId: 12345, includeAll: true`
 
 ### `get_tiers_and_nodes`
 
