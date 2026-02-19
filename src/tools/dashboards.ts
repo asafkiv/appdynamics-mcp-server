@@ -259,6 +259,7 @@ Returns: The created dashboard object with its new ID.`,
           backgroundType: "SOLID",
           template: template ?? false,
           warRoom: false,
+          properties: [],
           widgets: (widgets ?? []).map((w, i) => buildWidgetPayload(w, i)),
         };
 
@@ -466,8 +467,8 @@ Returns: Confirmation of deletion.`,
     async ({ dashboardId }) => {
       try {
         await appdPost(
-          `/controller/restui/dashboards/deleteDashboard`,
-          dashboardId
+          `/controller/restui/dashboards/deleteDashboards`,
+          [dashboardId]
         );
         return textResponse(
           `Dashboard ${dashboardId} deleted successfully.`
@@ -549,59 +550,89 @@ function buildWidgetPayload(
     useAutomaticFontSize: true,
     minHeight: 0,
     minWidth: 0,
+    propertiesMap: null,
+    layoutProperties: null,
   };
 
-  // Add metric-specific properties
-  if (w.applicationId) {
-    base.applicationId = w.applicationId;
-  }
-
-  if (w.metricPath) {
-    base.metricPath = w.metricPath;
-  }
-
-  if (w.entityType) {
-    base.entityType = w.entityType;
-    base.entitySelectionType = "SPECIFIC_ENTITY";
-  }
-
-  // Text widget content
-  if (w.type === "TextWidget" && w.text) {
-    base.text = w.text;
+  // ── TextWidget ──────────────────────────────────────────────────────────
+  if (w.type === "TextWidget") {
+    base.text = w.text ?? "";
     base.propertiesMap = {
       fontFamily: "Arial",
-      fontSize: 14,
+      fontSize: "14",
       textAlign: "center",
       color: "#000000",
     };
+    return base;
   }
 
-  // Health widget defaults
+  // ── HealthListWidget ────────────────────────────────────────────────────
   if (w.type === "HealthListWidget") {
-    base.entitySelectionType = w.entityType
-      ? "SPECIFIC_ENTITY"
-      : "ALL";
+    base.entityType = w.entityType ?? "APPLICATION";
+    base.entitySelectionType = w.entityType ? "SPECIFIC_ENTITY" : "ALL";
+    if (w.applicationId) {
+      base.applicationId = w.applicationId;
+    }
+    return base;
   }
 
-  // Graph widget defaults
-  if (
-    w.type === "AdvancedGraph" &&
-    w.metricPath &&
-    w.applicationId
-  ) {
-    base.dataSeriesTemplateMap = {
-      [`series-${index}`]: {
-        metricMatchCriteriaTemplate: {
-          metricExpressionTemplate: {
-            metricExpressionType: "ABSOLUTE",
-            metricPath: w.metricPath,
-          },
-          entityMatchCriteria: {
-            applicationId: w.applicationId,
-          },
+  // ── Metric-based widgets: AdvancedGraph, MetricValue, PieWidget, GaugeWidget
+  if (w.metricPath && w.applicationId) {
+    // Extract display name from metric path (last segment after |)
+    const pathParts = w.metricPath.split("|");
+    const displayName = pathParts[pathParts.length - 1] ?? w.metricPath;
+
+    const seriesTemplate = {
+      name: displayName,
+      metricType: "AVERAGE",
+      metricMatchCriteriaTemplate: {
+        metricExpressionTemplate: {
+          metricExpressionType: "ABSOLUTE",
+          functionType: "VALUE",
+          inputMetricPath: w.metricPath,
+          displayName,
+          inputMetricText: false,
+          literalMetricPath: w.metricPath,
         },
+        entityMatchCriteria: {
+          entityType: w.entityType ?? "APPLICATION",
+          applicationId: w.applicationId,
+        },
+        rollupMetricData: true,
+        evaluationType: "LAST_VALUE",
+        maxResults: 10,
       },
     };
+
+    base.dataSeriesTemplateMap = {
+      [`series-${index}`]: seriesTemplate,
+    };
+
+    // Time range defaults for metric widgets
+    base.isGlobal = false;
+    base.startTime = "";
+    base.endTime = "";
+    base.timeRangeType = "RELATIVE";
+    base.durationInMinutes = 60;
+
+    // AdvancedGraph extras
+    if (w.type === "AdvancedGraph") {
+      base.verticalAxisLabel = "";
+      base.horizontalAxisLabel = "";
+      base.showLegend = true;
+      base.legendPosition = "BOTTOM";
+      base.legendColumnCount = 1;
+      base.showEvents = false;
+    }
+  } else {
+    // Widget without metric binding
+    if (w.applicationId) {
+      base.applicationId = w.applicationId;
+    }
+    if (w.entityType) {
+      base.entityType = w.entityType;
+      base.entitySelectionType = "SPECIFIC_ENTITY";
+    }
   }
 
   return base;
