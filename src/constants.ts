@@ -36,16 +36,17 @@ export const ANOMALY_EVENT_TYPES = [
 
 export const DEFAULT_ANOMALY_SEVERITIES = "INFO,WARN,ERROR";
 
-// Dashboard widget types for creation helpers
+// Dashboard widget types (restui API names)
 export const WIDGET_TYPES = {
-  METRIC_GRAPH: "AdvancedGraph",
-  METRIC_VALUE: "MetricValue",
-  HEALTH_STATUS: "HealthListWidget",
-  TEXT: "TextWidget",
-  IMAGE: "ImageWidget",
-  IFRAME: "IFrameWidget",
-  PIE_CHART: "PieWidget",
-  GAUGE: "GaugeWidget",
+  METRIC_GRAPH: "TIMESERIES_GRAPH",
+  METRIC_VALUE: "METRIC_VALUE",
+  HEALTH_STATUS: "HEALTH_LIST",
+  TEXT: "TEXT",
+  IMAGE: "IMAGE",
+  IFRAME: "IFRAME",
+  PIE_CHART: "PIE",
+  GAUGE: "GAUGE",
+  ANALYTICS: "ANALYTICS",
 } as const;
 
 // Common BT performance metric names

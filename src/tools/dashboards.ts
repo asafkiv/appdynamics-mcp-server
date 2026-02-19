@@ -1,16 +1,40 @@
 /**
  * Dashboard tools: list, get, create, update, clone, delete, export.
  * Full CRUD for AppDynamics custom dashboards.
+ *
+ * Widget format matches the AppDynamics restui API:
+ *   - Types: TIMESERIES_GRAPH, METRIC_VALUE, HEALTH_LIST, TEXT, PIE, GAUGE, ANALYTICS
+ *   - Metrics use widgetsMetricMatchCriterias[] (not dataSeriesTemplateMap)
+ *   - Colors are integers (e.g. 16777215 = white), not hex strings
+ *   - Canvas type: CANVAS_TYPE_GRID with grid-unit positioning
  */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { appdGet, appdGetRaw, appdPost, appdDelete } from "../services/api-client.js";
+import { appdGetRaw, appdPost } from "../services/api-client.js";
 import { handleError, textResponse } from "../utils/error-handler.js";
 import { truncateIfNeeded } from "../utils/formatting.js";
-import type { Dashboard, DashboardSummary, DashboardWidget } from "../types.js";
+import type { Dashboard, DashboardSummary } from "../types.js";
 
-// ── Schemas ──────────────────────────────────────────────────────────────────
+// ── Color Helpers ─────────────────────────────────────────────────────────────
+
+/** Convert hex color string (#RRGGBB) to integer, or pass through if already a number. */
+function colorToInt(color: string | number | undefined, fallback: number): number {
+  if (color === undefined) return fallback;
+  if (typeof color === "number") return color;
+  const hex = color.replace(/^#/, "");
+  const parsed = parseInt(hex, 16);
+  return isNaN(parsed) ? fallback : parsed;
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const COLOR_WHITE = 16777215; // #FFFFFF
+const COLOR_LIGHT_GRAY = 15856629; // #F1F1F5
+const COLOR_DARK = 1646891; // #19222B
+const COLOR_BORDER = 14408667; // #DBDBDB
+
+// ── Schemas ───────────────────────────────────────────────────────────────────
 
 const ListSchema = {
   nameFilter: z
@@ -36,18 +60,17 @@ const CloneSchema = {
   newName: z.string().min(1).describe("Name for the cloned dashboard."),
 };
 
-// Widget definition schema for creating/updating dashboards
 const WidgetSchema = z.object({
   type: z
     .string()
     .describe(
-      "Widget type: 'AdvancedGraph' (time-series), 'MetricValue' (single number), 'HealthListWidget' (health status), 'TextWidget' (text/title), 'PieWidget' (pie chart), 'GaugeWidget' (gauge)."
+      "Widget type. Use: 'TIMESERIES_GRAPH' (time-series chart), 'METRIC_VALUE' (single number), 'HEALTH_LIST' (health status), 'TEXT' (text/title), 'PIE' (pie chart), 'GAUGE' (gauge)."
     ),
   title: z.string().describe("Widget title displayed on the dashboard."),
-  height: z.number().int().min(1).describe("Widget height in grid units."),
-  width: z.number().int().min(1).describe("Widget width in grid units."),
-  x: z.number().int().min(0).describe("X position on the dashboard grid."),
-  y: z.number().int().min(0).describe("Y position on the dashboard grid."),
+  height: z.number().int().min(1).describe("Widget height in grid units (typical: 2-4)."),
+  width: z.number().int().min(1).describe("Widget width in grid units (max 12 for full row)."),
+  x: z.number().int().min(0).describe("X position in grid units (0-11)."),
+  y: z.number().int().min(0).describe("Y position in grid units."),
   applicationId: z
     .number()
     .int()
@@ -62,11 +85,11 @@ const WidgetSchema = z.object({
   entityType: z
     .string()
     .optional()
-    .describe("Entity type for the widget (e.g., 'APPLICATION', 'TIER', 'NODE')."),
+    .describe("Entity type: 'APPLICATION', 'APPLICATION_COMPONENT' (tier), 'APPLICATION_COMPONENT_NODE' (node), 'POLICY' (health rules)."),
   text: z
     .string()
     .optional()
-    .describe("Text content for TextWidget type."),
+    .describe("Text content for TEXT widget type."),
   description: z.string().optional().describe("Widget description."),
 });
 
@@ -88,11 +111,7 @@ const CreateSchema = {
   widgets: z
     .array(WidgetSchema)
     .optional()
-    .describe("Array of widgets to place on the dashboard. Can be empty to create a blank dashboard, then add widgets later."),
-  backgroundColor: z
-    .string()
-    .optional()
-    .describe("Background color hex code (e.g., '#FFFFFF'). Default: white."),
+    .describe("Array of widgets to place on the dashboard. Can be empty to create a blank dashboard, then add widgets later with appd_add_widget_to_dashboard."),
   template: z
     .boolean()
     .optional()
@@ -109,7 +128,6 @@ const UpdateSchema = {
     .array(WidgetSchema)
     .optional()
     .describe("Complete set of widgets. NOTE: This replaces ALL existing widgets."),
-  backgroundColor: z.string().optional().describe("New background color."),
 };
 
 const AddWidgetSchema = {
@@ -117,10 +135,10 @@ const AddWidgetSchema = {
   widget: WidgetSchema.describe("The widget to add to the dashboard."),
 };
 
-// ── Registration ─────────────────────────────────────────────────────────────
+// ── Registration ──────────────────────────────────────────────────────────────
 
 export function registerDashboardTools(server: McpServer): void {
-  // ── List Dashboards ────────────────────────────────────────────────────────
+  // ── List Dashboards ─────────────────────────────────────────────────────────
 
   server.registerTool(
     "appd_get_dashboards",
@@ -173,7 +191,7 @@ Returns: Array of dashboard summaries.`,
     }
   );
 
-  // ── Get Dashboard Details ──────────────────────────────────────────────────
+  // ── Get Dashboard Details ───────────────────────────────────────────────────
 
   server.registerTool(
     "appd_get_dashboard",
@@ -207,7 +225,7 @@ Returns: Complete dashboard object with widgets, layout, and data source configu
     }
   );
 
-  // ── Create Dashboard ───────────────────────────────────────────────────────
+  // ── Create Dashboard ────────────────────────────────────────────────────────
 
   server.registerTool(
     "appd_create_dashboard",
@@ -217,14 +235,15 @@ Returns: Complete dashboard object with widgets, layout, and data source configu
 
 You can create a blank dashboard and add widgets later using appd_add_widget_to_dashboard, or provide widgets upfront.
 
-Widget types:
-  - "AdvancedGraph": Time-series graph (needs applicationId + metricPath)
-  - "MetricValue": Single metric value display (needs applicationId + metricPath)
-  - "HealthListWidget": Health status list (needs applicationId + entityType)
-  - "TextWidget": Static text or title (needs text)
-  - "PieWidget": Pie chart
-  - "GaugeWidget": Gauge display
+Widget types (use exact names):
+  - "TIMESERIES_GRAPH": Time-series line/area chart (needs applicationId + metricPath)
+  - "METRIC_VALUE": Single metric number display (needs applicationId + metricPath)
+  - "HEALTH_LIST": Health rule status list (needs applicationId, entityType like 'POLICY')
+  - "TEXT": Static text label or title (needs text)
+  - "PIE": Pie chart (needs applicationId + metricPath)
+  - "GAUGE": Gauge display (needs applicationId + metricPath)
 
+Grid layout: width max is 12 (full row). Height is in grid units (2-4 typical).
 Use appd_browse_metric_tree to discover metric paths for widgets.
 
 Args:
@@ -232,7 +251,6 @@ Args:
   - description (string, optional): Description
   - height/width (number, optional): Canvas size (default: 768x1024)
   - widgets (array, optional): Widgets to place on the dashboard
-  - backgroundColor (string, optional): Background color
   - template (boolean, optional): Create as template
 
 Returns: The created dashboard object with its new ID.`,
@@ -244,21 +262,26 @@ Returns: The created dashboard object with its new ID.`,
         openWorldHint: true,
       },
     },
-    async ({ name, description, height, width, widgets, backgroundColor, template }) => {
+    async ({ name, description, height, width, widgets, template }) => {
       try {
         const dashboardPayload = {
           name,
-          description: description ?? "",
+          description: description ?? null,
           height: height ?? 768,
           width: width ?? 1024,
-          canvasType: "ABSOLUTE",
+          canvasType: "CANVAS_TYPE_GRID",
           templateEntityType: "APPLICATION_COMPONENT_NODE",
           minimized: false,
-          color: "#000000",
-          backgroundColor: backgroundColor ?? "#FFFFFF",
-          backgroundType: "SOLID",
+          color: COLOR_LIGHT_GRAY,
+          backgroundColor: COLOR_LIGHT_GRAY,
           template: template ?? false,
           warRoom: false,
+          disabled: false,
+          refreshInterval: 120000,
+          minutesBeforeAnchorTime: -1,
+          startTime: -1,
+          endTime: -1,
+          layoutType: "",
           properties: [],
           widgets: (widgets ?? []).map((w, i) => buildWidgetPayload(w, i)),
         };
@@ -275,7 +298,7 @@ Returns: The created dashboard object with its new ID.`,
     }
   );
 
-  // ── Update Dashboard ───────────────────────────────────────────────────────
+  // ── Update Dashboard ────────────────────────────────────────────────────────
 
   server.registerTool(
     "appd_update_dashboard",
@@ -291,7 +314,6 @@ Args:
   - description (string, optional): New description
   - height/width (number, optional): New canvas size
   - widgets (array, optional): Complete widget set (replaces existing)
-  - backgroundColor (string, optional): New background color
 
 Returns: The updated dashboard object.`,
       inputSchema: UpdateSchema,
@@ -302,21 +324,18 @@ Returns: The updated dashboard object.`,
         openWorldHint: true,
       },
     },
-    async ({ dashboardId, name, description, height, width, widgets, backgroundColor }) => {
+    async ({ dashboardId, name, description, height, width, widgets }) => {
       try {
-        // Fetch existing dashboard
         const existing = await appdGetRaw<Dashboard>(
           `/controller/restui/dashboards/dashboardIfUpdated/${dashboardId}/-1`
         );
 
-        // Merge updates
         const updated = {
           ...existing,
           ...(name !== undefined && { name }),
           ...(description !== undefined && { description }),
           ...(height !== undefined && { height }),
           ...(width !== undefined && { width }),
-          ...(backgroundColor !== undefined && { backgroundColor }),
           ...(widgets !== undefined && {
             widgets: widgets.map((w, i) => buildWidgetPayload(w, i)),
           }),
@@ -334,7 +353,7 @@ Returns: The updated dashboard object.`,
     }
   );
 
-  // ── Add Widget to Dashboard ────────────────────────────────────────────────
+  // ── Add Widget to Dashboard ─────────────────────────────────────────────────
 
   server.registerTool(
     "appd_add_widget_to_dashboard",
@@ -344,11 +363,11 @@ Returns: The updated dashboard object.`,
 
 This fetches the current dashboard, appends the new widget, and saves it.
 
-Widget types:
-  - "AdvancedGraph": Time-series graph (needs applicationId + metricPath)
-  - "MetricValue": Single metric value (needs applicationId + metricPath)
-  - "HealthListWidget": Health status (needs applicationId + entityType)
-  - "TextWidget": Static text (needs text property in description)
+Widget types (use exact names):
+  - "TIMESERIES_GRAPH": Time-series chart (needs applicationId + metricPath)
+  - "METRIC_VALUE": Single metric number (needs applicationId + metricPath)
+  - "HEALTH_LIST": Health status list (needs applicationId + entityType)
+  - "TEXT": Static text label (needs text)
 
 Args:
   - dashboardId (number): Dashboard ID
@@ -365,7 +384,6 @@ Returns: The updated dashboard with the new widget added.`,
     },
     async ({ dashboardId, widget }) => {
       try {
-        // Fetch existing dashboard
         const existing = await appdGetRaw<Dashboard>(
           `/controller/restui/dashboards/dashboardIfUpdated/${dashboardId}/-1`
         );
@@ -393,7 +411,7 @@ Returns: The updated dashboard with the new widget added.`,
     }
   );
 
-  // ── Clone Dashboard ────────────────────────────────────────────────────────
+  // ── Clone Dashboard ─────────────────────────────────────────────────────────
 
   server.registerTool(
     "appd_clone_dashboard",
@@ -401,7 +419,7 @@ Returns: The updated dashboard with the new widget added.`,
       title: "Clone Dashboard",
       description: `Clone an existing dashboard with a new name.
 
-Creates an exact copy of the source dashboard (including all widgets) with the specified new name. Useful for creating environment-specific copies (e.g., clone "Prod Monitoring" to "Staging Monitoring").
+Creates an exact copy of the source dashboard (including all widgets) with the specified new name.
 
 Args:
   - dashboardId (number): Source dashboard ID to clone
@@ -418,17 +436,12 @@ Returns: The newly created dashboard with its new ID.`,
     },
     async ({ dashboardId, newName }) => {
       try {
-        // Fetch the source dashboard
         const source = await appdGetRaw<Dashboard>(
           `/controller/restui/dashboards/dashboardIfUpdated/${dashboardId}/-1`
         );
 
-        // Remove id and set new name
         const { id: _id, ...cloneData } = source;
-        const clonePayload = {
-          ...cloneData,
-          name: newName,
-        };
+        const clonePayload = { ...cloneData, name: newName };
 
         const created = await appdPost<Dashboard>(
           "/controller/restui/dashboards/createDashboard",
@@ -442,7 +455,7 @@ Returns: The newly created dashboard with its new ID.`,
     }
   );
 
-  // ── Delete Dashboard ───────────────────────────────────────────────────────
+  // ── Delete Dashboard ────────────────────────────────────────────────────────
 
   server.registerTool(
     "appd_delete_dashboard",
@@ -479,7 +492,7 @@ Returns: Confirmation of deletion.`,
     }
   );
 
-  // ── Export Dashboard ───────────────────────────────────────────────────────
+  // ── Export Dashboard ────────────────────────────────────────────────────────
 
   server.registerTool(
     "appd_export_dashboard",
@@ -487,7 +500,7 @@ Returns: Confirmation of deletion.`,
       title: "Export Dashboard JSON",
       description: `Export a dashboard as a portable JSON definition.
 
-The exported JSON can be used to recreate the dashboard in another controller, back it up, or use it as a template for appd_create_dashboard.
+The exported JSON can be used to recreate the dashboard in another controller or back it up.
 
 Args:
   - dashboardId (number): Dashboard ID to export
@@ -515,7 +528,7 @@ Returns: Complete dashboard JSON definition suitable for import.`,
   );
 }
 
-// ── Widget Helpers ──────────────────────────────────────────────────────────
+// ── Widget Builder ────────────────────────────────────────────────────────────
 
 interface WidgetInput {
   type: string;
@@ -531,108 +544,185 @@ interface WidgetInput {
   description?: string;
 }
 
+/**
+ * Build a widget payload that matches the AppDynamics restui dashboard API format.
+ * Reverse-engineered from real dashboard responses.
+ */
 function buildWidgetPayload(
   w: WidgetInput,
   index: number
 ): Record<string, unknown> {
+  // Map friendly type aliases to actual API types
+  const typeMap: Record<string, string> = {
+    AdvancedGraph: "TIMESERIES_GRAPH",
+    MetricValue: "METRIC_VALUE",
+    HealthListWidget: "HEALTH_LIST",
+    TextWidget: "TEXT",
+    PieWidget: "PIE",
+    GaugeWidget: "GAUGE",
+  };
+  const apiType = typeMap[w.type] ?? w.type;
+
+  // Common base properties matching the real API format
   const base: Record<string, unknown> = {
-    type: w.type,
     title: w.title,
+    type: apiType,
     height: w.height,
     width: w.width,
     x: w.x,
     y: w.y,
     label: w.title,
-    description: w.description ?? "",
-    drillDownUrl: "",
+    description: w.description ?? null,
+    drillDownUrl: null,
+    openUrlInCurrentTab: false,
     useMetricBrowserAsDrillDown: true,
-    backgroundColor: "rgba(0,0,0,0)",
-    useAutomaticFontSize: true,
+    drillDownActionType: null,
+    backgroundColor: COLOR_WHITE,
+    color: COLOR_DARK,
+    fontSize: 12,
+    useAutomaticFontSize: false,
+    borderEnabled: false,
+    borderThickness: 0,
+    borderColor: COLOR_BORDER,
+    backgroundAlpha: 1.0,
+    showValues: false,
+    formatNumber: true,
+    numDecimals: 0,
+    removeZeros: true,
+    backgroundColors: [COLOR_WHITE, COLOR_WHITE],
+    compactMode: false,
+    showTimeRange: false,
+    renderIn3D: false,
+    isGlobal: true,
+    properties: [],
+    missingEntities: null,
     minHeight: 0,
     minWidth: 0,
-    propertiesMap: null,
-    layoutProperties: null,
+    widgetsMetricMatchCriterias: null,
+    timeRangeSpecifierType: "UNKNOWN",
+    startTime: null,
+    endTime: null,
+    customTimeRange: null,
+    minutesBeforeAnchorTime: 15,
   };
 
-  // ── TextWidget ──────────────────────────────────────────────────────────
-  if (w.type === "TextWidget") {
+  // ── TEXT widget ─────────────────────────────────────────────────────────
+  if (apiType === "TEXT") {
     base.text = w.text ?? "";
-    base.propertiesMap = {
-      fontFamily: "Arial",
-      fontSize: "14",
-      textAlign: "center",
-      color: "#000000",
-    };
+    base.useMetricBrowserAsDrillDown = false;
     return base;
   }
 
-  // ── HealthListWidget ────────────────────────────────────────────────────
-  if (w.type === "HealthListWidget") {
+  // ── HEALTH_LIST widget ──────────────────────────────────────────────────
+  if (apiType === "HEALTH_LIST") {
+    base.useMetricBrowserAsDrillDown = false;
+    base.applicationId = w.applicationId ?? null;
     base.entityType = w.entityType ?? "APPLICATION";
-    base.entitySelectionType = w.entityType ? "SPECIFIC_ENTITY" : "ALL";
-    if (w.applicationId) {
-      base.applicationId = w.applicationId;
-    }
+    base.entitySelectionType = "ALL";
+    base.entityIds = [];
+    base.iconSize = 20;
+    base.iconPosition = "LEFT";
+    base.showSearchBox = false;
+    base.showList = true;
+    base.showListHeader = false;
+    base.showBarPie = true;
+    base.showPie = false;
+    base.innerRadius = 0;
+    base.aggregationType = "RATIO";
+    base.showCurrentHealthStatus = false;
     return base;
   }
 
-  // ── Metric-based widgets: AdvancedGraph, MetricValue, PieWidget, GaugeWidget
+  // ── Metric-based widgets: TIMESERIES_GRAPH, METRIC_VALUE, PIE, GAUGE ──
   if (w.metricPath && w.applicationId) {
-    // Extract display name from metric path (last segment after |)
     const pathParts = w.metricPath.split("|");
     const displayName = pathParts[pathParts.length - 1] ?? w.metricPath;
 
-    const seriesTemplate = {
-      name: displayName,
-      metricType: "AVERAGE",
-      metricMatchCriteriaTemplate: {
-        metricExpressionTemplate: {
-          metricExpressionType: "ABSOLUTE",
-          functionType: "VALUE",
-          inputMetricPath: w.metricPath,
-          displayName,
-          inputMetricText: false,
-          literalMetricPath: w.metricPath,
-        },
-        entityMatchCriteria: {
-          entityType: w.entityType ?? "APPLICATION",
+    base.widgetsMetricMatchCriterias = [
+      {
+        name: `Series ${index + 1}`,
+        nameUnique: true,
+        metricMatchCriteria: {
           applicationId: w.applicationId,
+          metricExpression: {
+            type: "LEAF_METRIC_EXPRESSION",
+            literalValueExpression: false,
+            literalValue: 0,
+            metricDefinition: {
+              type: "LOGICAL_METRIC",
+              logicalMetricName: null,
+              scope: null,
+              metricId: 0,
+            },
+            functionType: "VALUE",
+            displayName,
+            inputMetricText: true,
+            inputMetricPath: w.metricPath,
+            value: 0,
+          },
+          rollupMetricData: true,
+          expressionString: "",
+          metricDisplayNameStyle: "DISPLAY_STYLE_AUTO",
+          metricDisplayNameCustomFormat: null,
+          metricDataFilter: {
+            sortResultsAscending: false,
+            maxResults: 10,
+          },
+          useActiveBaseline: false,
+          baselineId: 0,
+          includeAbove: false,
+          includeBelow: false,
+          includeBoth: false,
+          includeBand12: false,
+          includeBand23: false,
+          includeBand34: false,
+          includeBand45: false,
+          includeShade: false,
+          isIncludeAllInactiveServers: false,
+          includeHistoricalNodes: false,
+          excludeMaintenanceWindow: false,
+          missingEntities: null,
         },
-        rollupMetricData: true,
-        evaluationType: "LAST_VALUE",
-        maxResults: 10,
+        seriesType: apiType === "PIE" ? "LINE" : "LINE",
+        axisPosition: "LEFT",
+        showRawMetricName: false,
+        metricType: "METRIC_DATA",
+        colorPalette: null,
       },
-    };
+    ];
 
-    base.dataSeriesTemplateMap = {
-      [`series-${index}`]: seriesTemplate,
-    };
-
-    // Time range defaults for metric widgets
-    base.isGlobal = false;
-    base.startTime = "";
-    base.endTime = "";
-    base.timeRangeType = "RELATIVE";
-    base.durationInMinutes = 60;
-
-    // AdvancedGraph extras
-    if (w.type === "AdvancedGraph") {
-      base.verticalAxisLabel = "";
-      base.horizontalAxisLabel = "";
+    // TIMESERIES_GRAPH extras
+    if (apiType === "TIMESERIES_GRAPH") {
       base.showLegend = true;
-      base.legendPosition = "BOTTOM";
+      base.legendPosition = "POSITION_BOTTOM";
       base.legendColumnCount = 1;
-      base.showEvents = false;
+      base.verticalAxisLabel = null;
+      base.hideHorizontalAxis = null;
+      base.horizontalAxisLabel = null;
+      base.axisType = "LINEAR";
+      base.stackMode = null;
+      base.multipleYAxis = null;
+      base.showEvents = null;
+      base.eventFilter = null;
+      base.interpolateDataGaps = false;
+      base.showAllTooltips = null;
+      base.staticThresholds = null;
     }
-  } else {
-    // Widget without metric binding
-    if (w.applicationId) {
-      base.applicationId = w.applicationId;
+
+    // PIE extras
+    if (apiType === "PIE") {
+      base.showLabels = true;
+      base.showLegend = true;
+      base.legendPosition = "POSITION_BOTTOM";
+      base.legendColumnCount = 1;
     }
-    if (w.entityType) {
-      base.entityType = w.entityType;
-      base.entitySelectionType = "SPECIFIC_ENTITY";
-    }
+
+    return base;
+  }
+
+  // Widget without metric binding
+  if (w.applicationId) {
+    base.applicationId = w.applicationId;
   }
 
   return base;
