@@ -1,408 +1,219 @@
 # AppDynamics MCP Server
 
-A Model Context Protocol (MCP) server that provides access to AppDynamics SaaS REST API, allowing you to query and interact with your AppDynamics instance through MCP-compatible clients like Cursor.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives LLM clients (Cursor, Claude Desktop, etc.) full access to your AppDynamics monitoring data — plus the ability to create and manage dashboards.
 
 ## Features
 
-- **OAuth2 Authentication**: Secure authentication using AppDynamics OAuth2 client credentials
-- **Token Caching**: Automatic token caching to minimize authentication requests
-- **Application Management**: Retrieve lists of all monitored applications in your AppDynamics instance
-- **Business Transactions**: Query business transactions and their performance metrics
-- **Health Violations**: Monitor health rule violations across applications
-- **Anomaly Detection**: Query anomaly detection events across applications
-- **Tiers & Nodes**: View application topology — tiers and their nodes
-- **Transaction Snapshots**: Deep diagnostic snapshots for individual requests
-- **Error Analysis**: Query error and exception events for root-cause analysis
-- **Generic Metrics**: Query any metric in the AppDynamics metric tree
+**19 tools** across 6 categories:
 
-## Prerequisites
+- **Discovery**: List and search applications by name
+- **Health Monitoring**: Health rules, violations, and anomaly detection
+- **Application Performance**: Business transactions, service endpoints, and their metrics
+- **Infrastructure**: Tiers, nodes, and backend/remote service dependencies
+- **Diagnostics**: Transaction snapshots and error events
+- **Metrics**: Browse the metric tree and query any metric
+- **Dashboards**: Full CRUD — list, view, create, update, add widgets, clone, delete, export
 
-- Node.js (v18 or higher)
-- npm or yarn
-- AppDynamics SaaS account with API client credentials
+### Key capabilities
 
-## Installation
+- **Natural language friendly**: Accept application names, not just IDs
+- **Metric tree browser**: Discover available metrics interactively
+- **Dashboard builder**: Create dashboards from natural language descriptions
+- **Smart defaults**: Sensible time ranges and result limits out of the box
 
-1. Clone the repository:
-```bash
-git clone https://github.com/asafkiv/appdynamics-mcp-server.git
-cd appdynamics-mcp-server
-```
+## Quick Start
 
-2. Install dependencies:
+### 1. Install dependencies
+
 ```bash
 npm install
 ```
 
-## Configuration
+### 2. Configure environment
 
-### AppDynamics API Client Setup
+Copy `.env.example` to `.env` and fill in your credentials:
 
-1. Log in to your AppDynamics Controller UI
-2. Navigate to **Settings** → **API Clients**
-3. Create a new API Client with the following:
-   - **Client Name**: Your chosen client name (e.g., `mcpV2`)
-   - **Client Secret**: Generated secret (save this securely)
-   - **Account Name**: Your AppDynamics account name (if required)
+```bash
+cp .env.example .env
+```
 
-### MCP Configuration (Cursor)
+Required variables:
 
-Add the following configuration to your Cursor MCP settings file (typically `~/.cursor/mcp.json`):
+| Variable | Description |
+|---|---|
+| `APPD_URL` | Controller base URL (e.g., `https://mycompany.saas.appdynamics.com`) |
+| `APPD_CLIENT_NAME` | OAuth client name or API key |
+| `APPD_CLIENT_SECRET` | OAuth client secret |
+| `APPD_ACCOUNT_NAME` | Account name (for `clientName@accountName` format) |
+
+### 3. Add to your MCP client
+
+**Cursor** (`~/.cursor/mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "appdynamics": {
-      "command": "C:\\TEMP\\AppD-MCP\\appd-mcp-server\\node_modules\\.bin\\tsx.cmd",
-      "args": [
-        "C:\\TEMP\\AppD-MCP\\appd-mcp-server\\src\\index.ts"
-      ],
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/path/to/appdynamics-mcp-server",
       "env": {
-        "APPD_URL": "https://your-account.saas.appdynamics.com",
-        "APPD_CLIENT_NAME": "your_client_name",
-        "APPD_CLIENT_SECRET": "your_client_secret",
-        "APPD_ACCOUNT_NAME": "your_account_name"
+        "APPD_URL": "https://your-controller.saas.appdynamics.com",
+        "APPD_CLIENT_NAME": "your-client-name",
+        "APPD_CLIENT_SECRET": "your-client-secret",
+        "APPD_ACCOUNT_NAME": "your-account-name"
       }
     }
   }
 }
 ```
 
-**Note**:
-- Update the `command` path to match your installation directory
-- Replace `APPD_URL` with your AppDynamics controller URL (e.g., `https://your-account.saas.appdynamics.com`)
-- Replace `your_client_name`, `your_client_secret`, and `your_account_name` with your actual AppDynamics credentials
-- The `APPD_ACCOUNT_NAME` is optional if your client ID doesn't require the `clientName@accountName` format
-
-### Alternative: API Key Authentication
-
-If you prefer to use an API key directly (not recommended for production), you can use:
+**Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
 {
-  "env": {
-    "APPD_API_KEY": "your_api_key"
+  "mcpServers": {
+    "appdynamics": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/appdynamics-mcp-server/src/index.ts"],
+      "env": {
+        "APPD_URL": "https://your-controller.saas.appdynamics.com",
+        "APPD_CLIENT_NAME": "your-client-name",
+        "APPD_CLIENT_SECRET": "your-client-secret",
+        "APPD_ACCOUNT_NAME": "your-account-name"
+      }
+    }
   }
 }
 ```
 
-## Available Tools
+## Tools Reference
 
-### `get_applications`
+### Discovery
 
-Retrieves a list of all business applications currently being monitored in your AppDynamics SaaS instance.
+| Tool | Description |
+|---|---|
+| `appd_get_applications` | List all monitored applications (with optional name filter) |
 
-**Parameters**: None
+### Health Monitoring
 
-**Returns**: JSON array of applications with the following structure:
-```json
-[
-  {
-    "name": "Application Name",
-    "id": 12345,
-    "accountGuid": "guid-string",
-    "description": "Optional description"
-  }
-]
+| Tool | Description |
+|---|---|
+| `appd_get_health_rules` | List health rules or get details of a specific rule |
+| `appd_get_health_violations` | Get health rule violations for one or all apps |
+| `appd_get_anomalies` | Get anomaly events (open-only by default) |
+
+### Application Performance
+
+| Tool | Description |
+|---|---|
+| `appd_get_business_transactions` | List BTs for an application |
+| `appd_get_bt_performance` | Get response time, throughput, errors for a BT |
+| `appd_get_service_endpoints` | List service endpoints (API-level granularity) |
+| `appd_get_service_endpoint_performance` | Get performance metrics for a service endpoint |
+
+### Infrastructure
+
+| Tool | Description |
+|---|---|
+| `appd_get_tiers_and_nodes` | Get tiers with their nodes (agents, machines, IPs) |
+| `appd_get_backends` | List backend dependencies (databases, APIs, caches, queues) |
+
+### Diagnostics
+
+| Tool | Description |
+|---|---|
+| `appd_get_snapshots` | Get transaction snapshots (deep diagnostic captures) |
+| `appd_get_errors` | Get error and exception events |
+
+### Metrics
+
+| Tool | Description |
+|---|---|
+| `appd_browse_metric_tree` | Browse the metric hierarchy to discover available metrics |
+| `appd_get_metric_data` | Query any metric by path |
+
+### Dashboards
+
+| Tool | Description |
+|---|---|
+| `appd_get_dashboards` | List all custom dashboards |
+| `appd_get_dashboard` | Get full dashboard definition with widgets |
+| `appd_create_dashboard` | Create a new dashboard with optional widgets |
+| `appd_update_dashboard` | Update dashboard properties and/or widgets |
+| `appd_add_widget_to_dashboard` | Add a single widget without replacing existing ones |
+| `appd_clone_dashboard` | Clone a dashboard with a new name |
+| `appd_delete_dashboard` | Delete a dashboard (permanent) |
+| `appd_export_dashboard` | Export dashboard as portable JSON |
+
+## Example Conversations
+
+**"What's the health status of my production apps?"**
+→ Uses `appd_get_applications` + `appd_get_health_violations` + `appd_get_anomalies`
+
+**"Show me the slowest business transactions for the Orders app"**
+→ Uses `appd_get_business_transactions` + `appd_get_bt_performance`
+
+**"What databases does the Payment service connect to?"**
+→ Uses `appd_get_backends` with typeFilter="JDBC"
+
+**"Create a dashboard for the Checkout app with response time and error rate"**
+→ Uses `appd_get_applications` → `appd_browse_metric_tree` → `appd_create_dashboard`
+
+**"Clone the production monitoring dashboard for staging"**
+→ Uses `appd_get_dashboards` → `appd_clone_dashboard`
+
+## Architecture
+
 ```
-
-### `get_health_violations`
-
-Retrieves health rule violations for a specific application or all applications in your AppDynamics instance.
-
-**Parameters**:
-- `applicationId` (optional, number): The ID of the application to check for health violations. If not provided, checks all applications.
-
-**Returns**: 
-- If `applicationId` is provided: JSON array of health rule violations for that application
-- If `applicationId` is not provided: JSON array of objects containing violations grouped by application:
-```json
-[
-  {
-    "applicationId": 12345,
-    "applicationName": "Application Name",
-    "violations": [
-      {
-        "id": 67890,
-        "name": "Health Rule Name",
-        "severity": "WARN|ERROR|CRITICAL",
-        "affectedEntityType": "APPLICATION_COMPONENT_NODE",
-        "detectedTimeInMillis": 1234567890,
-        "summary": "Violation summary"
-      }
-    ]
-  }
-]
+src/
+├── index.ts              # Entry point, registers all tools
+├── types.ts              # TypeScript interfaces
+├── constants.ts          # Shared constants
+├── services/
+│   ├── auth.ts           # OAuth2 token management
+│   └── api-client.ts     # Authenticated HTTP client
+├── utils/
+│   ├── error-handler.ts  # Error → MCP response
+│   ├── app-resolver.ts   # App name → ID resolution
+│   └── formatting.ts     # Response formatting
+└── tools/                # One file per tool domain
+    ├── applications.ts
+    ├── health-rules.ts
+    ├── health-violations.ts
+    ├── anomalies.ts
+    ├── business-transactions.ts
+    ├── bt-performance.ts
+    ├── service-endpoints.ts
+    ├── tiers-nodes.ts
+    ├── backends.ts
+    ├── snapshots.ts
+    ├── errors.ts
+    ├── metrics.ts
+    └── dashboards.ts
 ```
-
-**Example Usage**:
-- Get violations for a specific application: `get_health_violations` with `applicationId: 12345`
-- Get violations for all applications: `get_health_violations` with no parameters
-
-### `get_business_transactions`
-
-Retrieves a list of all business transactions for a given application.
-
-**Parameters**:
-- `applicationId` (required, number): The ID of the application to retrieve business transactions for.
-
-**Returns**: JSON array of business transactions with details such as name, tier, entry point type, and ID.
-
-**Example Usage**:
-- Get all BTs for an application: `get_business_transactions` with `applicationId: 12345`
-
-### `get_bt_performance`
-
-Retrieves performance metrics for a specific business transaction.
-
-**Parameters**:
-- `applicationId` (required, number): The ID of the application.
-- `btId` (required, number): The ID of the business transaction.
-- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 60 (last hour).
-
-**Returns**: JSON object containing the following metrics:
-- Average Response Time (ms)
-- Calls per Minute
-- Errors per Minute
-- Number of Slow Calls
-- Number of Very Slow Calls
-- Stall Count
-
-**Example Usage**:
-- Get last hour performance: `get_bt_performance` with `applicationId: 12345, btId: 67890`
-- Get last 24h performance: `get_bt_performance` with `applicationId: 12345, btId: 67890, durationInMins: 1440`
-
-### `get_anomalies`
-
-Retrieves anomaly detection events for a specific application or all applications. **By default, returns only currently open anomalies** (filters out anomalies that have been closed).
-
-**Parameters**:
-- `applicationId` (optional, number): The ID of the application. If not provided, checks all applications.
-- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 1440 (last 24 hours).
-- `severities` (optional, string): Comma-separated severity levels to include. Defaults to `INFO,WARN,ERROR`.
-- `includeAll` (optional, boolean): If `true`, includes all events (opens, closes, upgrades, downgrades). If `false` (default), returns only currently open anomalies by filtering out anomalies where the most recent event is a close.
-
-**Returns**: By default, returns only currently open anomaly events. When querying all applications, results are grouped by application:
-```json
-[
-  {
-    "applicationId": 12345,
-    "applicationName": "Application Name",
-    "anomalies": [
-      {
-        "id": 67890,
-        "type": "ANOMALY_OPEN_CRITICAL",
-        "severity": "ERROR",
-        "summary": "Anomaly summary",
-        "eventTime": 1234567890
-      }
-    ]
-  }
-]
-```
-
-**Example Usage**:
-- Get currently open anomalies for a specific application: `get_anomalies` with `applicationId: 12345`
-- Get all currently open anomalies across all applications: `get_anomalies` with no parameters
-- Get last 4 hours of open critical anomalies: `get_anomalies` with `applicationId: 12345, durationInMins: 240, severities: "ERROR"`
-- Get all anomaly events including closed ones: `get_anomalies` with `applicationId: 12345, includeAll: true`
-
-### `get_tiers_and_nodes`
-
-Retrieves the tiers and nodes (infrastructure topology) for a given application. Nodes are grouped under their respective tiers.
-
-**Parameters**:
-- `applicationId` (required, number): The ID of the application.
-
-**Returns**: JSON array of tiers, each containing a `nodes` array with the nodes belonging to that tier.
-
-**Example Usage**:
-- Get topology for an application: `get_tiers_and_nodes` with `applicationId: 12345`
-
-### `get_snapshots`
-
-Retrieves transaction snapshots (slow, error, stall) for an application. Snapshots provide deep diagnostic details for individual requests.
-
-**Parameters**:
-- `applicationId` (required, number): The ID of the application.
-- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 30.
-- `guids` (optional, string): Comma-separated request GUIDs to retrieve specific snapshots.
-- `maxResults` (optional, number): Maximum number of snapshots to return. Defaults to 20.
-
-**Example Usage**:
-- Get recent snapshots: `get_snapshots` with `applicationId: 12345`
-- Get last 2 hours of snapshots: `get_snapshots` with `applicationId: 12345, durationInMins: 120`
-
-### `get_errors`
-
-Retrieves error and exception events for an application. Useful for root-cause analysis of failures.
-
-**Parameters**:
-- `applicationId` (required, number): The ID of the application.
-- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 60.
-
-**Returns**: JSON array of error events including `ERROR`, `APPLICATION_ERROR`, and `APPLICATION_CRASH` event types.
-
-**Example Usage**:
-- Get errors in the last hour: `get_errors` with `applicationId: 12345`
-- Get errors in the last 24 hours: `get_errors` with `applicationId: 12345, durationInMins: 1440`
-
-### `get_metric_data`
-
-A generic tool to query any metric in the AppDynamics metric tree. Supports infrastructure metrics, custom metrics, and any other metric path.
-
-**Parameters**:
-- `applicationId` (required, number): The ID of the application.
-- `metricPath` (required, string): The metric path to query.
-- `durationInMins` (optional, number): Time range in minutes to look back. Defaults to 60.
-
-**Common metric paths**:
-- `Overall Application Performance|Average Response Time (ms)`
-- `Overall Application Performance|Calls per Minute`
-- `Overall Application Performance|Errors per Minute`
-- `Application Infrastructure Performance|*|Hardware Resources|CPU|%Busy`
-- `Application Infrastructure Performance|*|Hardware Resources|Memory|Used %`
-- `Application Infrastructure Performance|*|JVM|Garbage Collection|GC Time Spent per Min (ms)`
-
-**Example Usage**:
-- Get overall app response time: `get_metric_data` with `applicationId: 12345, metricPath: "Overall Application Performance|Average Response Time (ms)"`
-- Get CPU usage across all tiers: `get_metric_data` with `applicationId: 12345, metricPath: "Application Infrastructure Performance|*|Hardware Resources|CPU|%Busy"`
-
-## Usage
-
-Once configured, you can use the MCP server in Cursor or other MCP-compatible clients:
-
-1. Restart Cursor to load the MCP server configuration
-2. The server will automatically authenticate using OAuth2
-3. Use the available tools through the MCP interface
-
-### Example Queries
-
-**Get all applications:**
-Ask Cursor: "Which applications are currently being monitored in our AppDynamics instance?"
-
-**Check health violations:**
-Ask Cursor: "Are there any health rule violations in our AppDynamics instance?"
-or
-Ask Cursor: "Check for health violations in application ID 12345"
-
-**List business transactions:**
-Ask Cursor: "What business transactions exist in application 12345?"
-
-**Check BT performance:**
-Ask Cursor: "Show me the performance metrics for business transaction 67890 in application 12345"
-or
-Ask Cursor: "How is the response time for BT 67890 over the last 24 hours?"
-
-**Check anomalies:**
-Ask Cursor: "Are there any anomalies detected across our applications?"
-or
-Ask Cursor: "Show me anomalies for application 12345 in the last 4 hours"
-
-**View application topology:**
-Ask Cursor: "Show me the tiers and nodes for application 12345"
-
-**Investigate snapshots:**
-Ask Cursor: "Get me the latest transaction snapshots for application 12345"
-
-**Check errors:**
-Ask Cursor: "What errors occurred in application 12345 in the last 24 hours?"
-
-**Query custom metrics:**
-Ask Cursor: "What's the CPU usage across all tiers in application 12345?"
-
-The MCP server will:
-1. Authenticate with AppDynamics using OAuth2
-2. Execute the requested query
-3. Return the results in a structured format
 
 ## Development
 
-### Project Structure
+```bash
+# Run in dev mode (auto-reload)
+npm run dev
 
+# Build TypeScript
+npm run build
+
+# Run built version
+npm start
 ```
-appd-mcp-server/
-├── src/
-│   └── index.ts          # Main MCP server implementation
-├── package.json          # Dependencies and scripts
-├── tsconfig.json         # TypeScript configuration
-├── CLAUDE.md             # Claude Code onboarding guide
-└── README.md             # This file
-```
 
-### Building
+## Authentication
 
-The project uses TypeScript with `tsx` for direct execution. No build step is required for development.
+The server supports two authentication modes:
 
-### TypeScript Configuration
+1. **OAuth2 Client Credentials** (recommended): Set `APPD_CLIENT_NAME`, `APPD_CLIENT_SECRET`, and optionally `APPD_ACCOUNT_NAME`. The server acquires and caches tokens automatically.
 
-The project is configured with:
-- **Module System**: ES Modules (`"type": "module"`)
-- **Target**: ES2022
-- **Module Resolution**: Node16
-- **Strict Mode**: Enabled
-
-## Authentication Flow
-
-1. The server checks for cached OAuth token
-2. If no valid token exists, it requests a new token using:
-   - Client credentials grant type
-   - Client ID (optionally formatted as `clientName@accountName`)
-   - Client secret
-3. Token is cached until near expiry (5 minutes before)
-4. All API requests use the Bearer token for authentication
-
-## Error Handling
-
-The server provides detailed error messages for:
-- Authentication failures
-- API request errors
-- Missing configuration
-- Network issues
-
-## Security Notes
-
-- **Never commit** your `APPD_CLIENT_SECRET` or API keys to version control
-- Store credentials securely in environment variables or secure configuration files
-- Rotate API client credentials regularly
-- Use the minimum required permissions for your API client
-
-## Troubleshooting
-
-### Authentication Errors
-
-If you encounter `401 Unauthorized` errors:
-1. Verify your `APPD_CLIENT_NAME` and `APPD_CLIENT_SECRET` are correct
-2. Check if your API client has the required permissions
-3. Ensure your account name is correct if using the `clientName@accountName` format
-
-### Connection Issues
-
-If the server fails to connect:
-1. Verify the `APPD_URL` environment variable is set to your correct controller URL (e.g., `https://your-account.saas.appdynamics.com`)
-2. Check your network connectivity
-3. Verify firewall settings allow outbound HTTPS connections
-
-### MCP Server Not Loading
-
-If Cursor doesn't recognize the MCP server:
-1. Verify the path in `mcp.json` is correct
-2. Ensure `tsx` is installed (`npm install`)
-3. Restart Cursor completely
-4. Check Cursor's MCP server logs for errors
+2. **API Key**: Set only `APPD_CLIENT_NAME` (as the API key). No secret needed.
 
 ## License
 
 ISC
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For issues related to:
-- **AppDynamics API**: Consult [AppDynamics Documentation](https://docs.appdynamics.com/)
-- **MCP Protocol**: See [Model Context Protocol Documentation](https://modelcontextprotocol.io/)
-- **This Project**: Open an issue on GitHub
-

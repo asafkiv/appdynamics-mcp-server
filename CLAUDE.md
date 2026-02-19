@@ -1,68 +1,101 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
 
 ## Project Overview
 
-AppDynamics MCP Server — a Model Context Protocol server that exposes AppDynamics SaaS REST API data to MCP-compatible clients (e.g., Cursor). It also includes a standalone background monitoring service that creates/resolves Jira tickets based on health rule violations.
+AppDynamics MCP Server — a Model Context Protocol server that exposes AppDynamics SaaS REST API data to MCP-compatible clients (Cursor, Claude Desktop, etc.). Provides 19 tools covering application monitoring, diagnostics, metric browsing, and full dashboard CRUD.
 
 ## Running
 
-No build step is needed. TypeScript is executed directly via `tsx`.
-
 - **MCP server**: `npx tsx src/index.ts` (launched automatically by MCP clients via stdio transport)
-- **Background monitor**: `npm run monitor` (or `npx tsx src/monitor.ts`)
+- **Build**: `npm run build` (compiles to `dist/`)
+- **Dev mode**: `npm run dev`
 - **Install dependencies**: `npm install`
-- **Tests**: Not yet implemented (`npm test` exits with error)
 
 ## Architecture
 
-The codebase has two independent entry points that share no code between them (OAuth logic is duplicated):
+### Project Structure
 
-### `src/index.ts` — MCP Server
-- Registers two MCP tools: `get_applications` and `get_health_violations`
-- Uses `@modelcontextprotocol/sdk` with `StdioServerTransport`
-- Credentials come from environment variables (no `.env` loading; the MCP client provides env vars)
-- Exposes tools via `ListToolsRequestSchema` and handles calls via `CallToolRequestSchema`
+```
+src/
+├── index.ts              # Entry point — creates McpServer, registers all tools
+├── types.ts              # TypeScript interfaces for all AppDynamics entities
+├── constants.ts          # Shared constants (timeouts, defaults, limits)
+├── services/
+│   ├── auth.ts           # OAuth2 token management with caching
+│   └── api-client.ts     # Shared HTTP client (appdGet, appdPost, appdDelete, appdGetRaw)
+├── utils/
+│   ├── error-handler.ts  # Centralized error → MCP response conversion
+│   ├── app-resolver.ts   # Application name → ID resolver with cache
+│   └── formatting.ts     # Response truncation, timestamp formatting, tables
+└── tools/
+    ├── applications.ts        # appd_get_applications
+    ├── health-rules.ts        # appd_get_health_rules
+    ├── health-violations.ts   # appd_get_health_violations
+    ├── anomalies.ts           # appd_get_anomalies
+    ├── business-transactions.ts # appd_get_business_transactions
+    ├── bt-performance.ts      # appd_get_bt_performance
+    ├── service-endpoints.ts   # appd_get_service_endpoints, appd_get_service_endpoint_performance
+    ├── tiers-nodes.ts         # appd_get_tiers_and_nodes
+    ├── backends.ts            # appd_get_backends
+    ├── snapshots.ts           # appd_get_snapshots
+    ├── errors.ts              # appd_get_errors
+    ├── metrics.ts             # appd_get_metric_data, appd_browse_metric_tree
+    └── dashboards.ts          # appd_get_dashboards, appd_get_dashboard, appd_create_dashboard,
+                               # appd_update_dashboard, appd_add_widget_to_dashboard,
+                               # appd_clone_dashboard, appd_delete_dashboard, appd_export_dashboard
+```
 
-### `src/monitor.ts` — Background Monitoring Service
-- Polls AppDynamics for health violations on a configurable interval (default: 60s)
-- Creates Jira tickets (via REST API v2) for new violations, transitions them to "Done" when resolved
-- Persists state to `violations-state.json` (incident ID → Jira ticket key mapping)
-- Loads `.env` via `dotenv` (unlike the MCP server)
-- Handles graceful shutdown on SIGINT/SIGTERM by saving state
+### Key Design Decisions
+
+- **Modern MCP SDK**: Uses `McpServer` with `registerTool()` and Zod input schemas
+- **App name resolution**: All tools accept application name OR numeric ID
+- **Modular tools**: Each tool file exports a `register*Tools(server)` function
+- **Shared API client**: Single authenticated HTTP client with consistent error handling
+- **Response truncation**: Large responses are automatically truncated with pagination hints
+- **Tool prefixing**: All tools prefixed with `appd_` to avoid conflicts with other MCP servers
 
 ### Authentication
+
 - **Primary**: OAuth2 client credentials flow → `POST /controller/api/oauth/access_token`
 - Client ID formatted as `clientName@accountName` when `APPD_ACCOUNT_NAME` is set
 - Token cached with 5-minute safety margin before expiry
 - **Fallback**: Direct API key if only `APPD_CLIENT_NAME` is set (no secret)
 
-### API Resilience
-Health violations fetching has multiple fallback layers:
-1. Tries `/problems/healthrule-violations` endpoint first
-2. Falls back to `/problems` endpoint on 404
-3. Handles multiple response shapes: `healthRuleViolations`, `violations`, `data`, or `problems` array
+### Tools Summary (19 total)
+
+| Category | Tools |
+|---|---|
+| Discovery | `appd_get_applications` |
+| Health | `appd_get_health_rules`, `appd_get_health_violations`, `appd_get_anomalies` |
+| Performance | `appd_get_business_transactions`, `appd_get_bt_performance`, `appd_get_service_endpoints`, `appd_get_service_endpoint_performance` |
+| Infrastructure | `appd_get_tiers_and_nodes`, `appd_get_backends` |
+| Diagnostics | `appd_get_snapshots`, `appd_get_errors` |
+| Metrics | `appd_get_metric_data`, `appd_browse_metric_tree` |
+| Dashboards | `appd_get_dashboards`, `appd_get_dashboard`, `appd_create_dashboard`, `appd_update_dashboard`, `appd_add_widget_to_dashboard`, `appd_clone_dashboard`, `appd_delete_dashboard`, `appd_export_dashboard` |
 
 ## Environment Variables
 
-| Variable | Used By | Description |
+| Variable | Required | Description |
 |---|---|---|
-| `APPD_CLIENT_NAME` | Both | OAuth client name or API key |
-| `APPD_CLIENT_SECRET` | Both | OAuth client secret |
-| `APPD_ACCOUNT_NAME` | Both | Optional, for `clientName@accountName` format |
-| `JIRA_URL` | Monitor | Jira instance URL |
-| `JIRA_USERNAME` | Monitor | Jira username (email) |
-| `JIRA_TOKEN` | Monitor | Jira API token |
-| `JIRA_PROJECT_KEY` | Monitor | Jira project key (default: `TAF`) |
-| `CHECK_INTERVAL_MS` | Monitor | Polling interval in ms (default: `60000`) |
+| `APPD_URL` | Yes | AppDynamics controller base URL |
+| `APPD_CLIENT_NAME` | Yes | OAuth client name or API key |
+| `APPD_CLIENT_SECRET` | No | OAuth client secret (omit for API key auth) |
+| `APPD_ACCOUNT_NAME` | No | Account name for `clientName@accountName` format |
 
 ## Key Details
 
 - ES Modules (`"type": "module"` in package.json) — use `.js` extensions in imports
-- TypeScript strict mode with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`
+- TypeScript strict mode with `noUncheckedIndexedAccess`
 - Target: ES2022, Module resolution: Node16
-- AppDynamics base URL is hardcoded to `https://experience.saas.appdynamics.com` (SaaS only)
-- Jira integration uses Basic auth (base64-encoded `username:token`)
+- Zod v3 for runtime input validation
+- All API calls go through `services/api-client.ts` for consistent auth and error handling
+- Dashboard APIs use `/restui/` endpoints (not the standard `/rest/` prefix)
 
-- always update README.MD when adding new capabilites or fixing bugs
+## Guidelines
+
+- Always update this file and README.md when adding new tools or fixing bugs
+- Follow the existing tool registration pattern: one file per domain, Zod schemas, tool annotations
+- Prefix all tool names with `appd_`
+- Accept application name or ID wherever an application reference is needed
