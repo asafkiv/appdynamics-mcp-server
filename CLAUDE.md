@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## Project Overview
 
-AppDynamics MCP Server — a Model Context Protocol server that exposes AppDynamics SaaS REST API data to MCP-compatible clients (Cursor, Claude Desktop, etc.). Provides 19 tools covering application monitoring, diagnostics, metric browsing, and full dashboard CRUD.
+AppDynamics MCP Server — a Model Context Protocol server that exposes AppDynamics SaaS REST API data to MCP-compatible clients (Cursor, Claude Desktop, etc.). Provides 20 tools covering application monitoring, diagnostics, metric browsing, full dashboard CRUD, and automated root cause analysis.
 
 ## Running
 
@@ -42,9 +42,10 @@ src/
     ├── snapshots.ts           # appd_get_snapshots
     ├── errors.ts              # appd_get_errors
     ├── metrics.ts             # appd_get_metric_data, appd_browse_metric_tree
-    └── dashboards.ts          # appd_get_dashboards, appd_get_dashboard, appd_create_dashboard,
-                               # appd_update_dashboard, appd_add_widget_to_dashboard,
-                               # appd_clone_dashboard, appd_delete_dashboard, appd_export_dashboard
+    ├── dashboards.ts          # appd_get_dashboards, appd_get_dashboard, appd_create_dashboard,
+    │                          # appd_update_dashboard, appd_add_widget_to_dashboard,
+    │                          # appd_clone_dashboard, appd_delete_dashboard, appd_export_dashboard
+    └── root-cause.ts          # appd_diagnose_issue
 ```
 
 ### Key Design Decisions
@@ -63,7 +64,7 @@ src/
 - Token cached with 5-minute safety margin before expiry
 - **Fallback**: Direct API key if only `APPD_CLIENT_NAME` is set (no secret)
 
-### Tools Summary (19 total)
+### Tools Summary (20 total)
 
 | Category | Tools |
 |---|---|
@@ -72,6 +73,7 @@ src/
 | Performance | `appd_get_business_transactions`, `appd_get_bt_performance`, `appd_get_service_endpoints`, `appd_get_service_endpoint_performance` |
 | Infrastructure | `appd_get_tiers_and_nodes`, `appd_get_backends` |
 | Diagnostics | `appd_get_snapshots`, `appd_get_errors` |
+| Diagnostics+ | `appd_diagnose_issue` |
 | Metrics | `appd_get_metric_data`, `appd_browse_metric_tree` |
 | Dashboards | `appd_get_dashboards`, `appd_get_dashboard`, `appd_create_dashboard`, `appd_update_dashboard`, `appd_add_widget_to_dashboard`, `appd_clone_dashboard`, `appd_delete_dashboard`, `appd_export_dashboard` |
 

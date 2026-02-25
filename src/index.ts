@@ -34,6 +34,7 @@ import { registerAnomalyTools } from "./tools/anomalies.js";
 import { registerBackendTools } from "./tools/backends.js";
 import { registerServiceEndpointTools } from "./tools/service-endpoints.js";
 import { registerDashboardTools } from "./tools/dashboards.js";
+import { registerRootCauseTools } from "./tools/root-cause.js";
 
 // ── Server Setup ─────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ registerBackendTools(server);
 // Diagnostics
 registerSnapshotTools(server);
 registerErrorTools(server);
+registerRootCauseTools(server);
 
 // Metrics
 registerMetricTools(server);

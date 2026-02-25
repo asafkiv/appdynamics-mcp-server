@@ -4,13 +4,14 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives L
 
 ## Features
 
-**19 tools** across 6 categories:
+**20 tools** across 7 categories:
 
 - **Discovery**: List and search applications by name
 - **Health Monitoring**: Health rules, violations, and anomaly detection
 - **Application Performance**: Business transactions, service endpoints, and their metrics
 - **Infrastructure**: Tiers, nodes, and backend/remote service dependencies
 - **Diagnostics**: Transaction snapshots and error events
+- **Root Cause Analysis**: Automated composite diagnosis across all signal types
 - **Metrics**: Browse the metric tree and query any metric
 - **Dashboards**: Full CRUD — list, view, create, update, add widgets, clone, delete, export
 
@@ -126,6 +127,12 @@ Required variables:
 | `appd_get_snapshots` | Get transaction snapshots (deep diagnostic captures) |
 | `appd_get_errors` | Get error and exception events |
 
+### Root Cause Analysis
+
+| Tool | Description |
+|---|---|
+| `appd_diagnose_issue` | Automated root cause analysis — fetches violations, anomalies, error events, and snapshots in parallel, then returns ranked candidates, a merged timeline, error breakdown, and investigation steps |
+
 ### Metrics
 
 | Tool | Description |
@@ -163,6 +170,12 @@ Required variables:
 **"Clone the production monitoring dashboard for staging"**
 → Uses `appd_get_dashboards` → `appd_clone_dashboard`
 
+**"Why is my Payment app slow? Diagnose the last hour"**
+→ Uses `appd_diagnose_issue` with application="Payment", durationInMins=60 — returns ranked root cause candidates, merged event timeline, error class breakdown, and step-by-step investigation guide
+
+**"Are there any errors spiking in the Orders app right now?"**
+→ Uses `appd_diagnose_issue` with application="Orders", focus="errors"
+
 ## Architecture
 
 ```
@@ -190,7 +203,8 @@ src/
     ├── snapshots.ts
     ├── errors.ts
     ├── metrics.ts
-    └── dashboards.ts
+    ├── dashboards.ts
+    └── root-cause.ts
 ```
 
 ## Development
