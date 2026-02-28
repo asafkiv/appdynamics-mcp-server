@@ -7,19 +7,10 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { appdGet } from "../services/api-client.js";
 import { resolveAppId } from "../utils/app-resolver.js";
-import { handleError, textResponse } from "../utils/error-handler.js";
+import { handleError, textResponse, isAxios404 } from "../utils/error-handler.js";
 import { truncateIfNeeded } from "../utils/formatting.js";
 import { DEFAULT_VIOLATIONS_DURATION_MINS } from "../constants.js";
 import type { AppDApplication, HealthRuleViolation } from "../types.js";
-
-function isAxios404(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "isAxiosError" in error &&
-    "response" in error &&
-    (error as Error & { response?: { status: number } }).response?.status === 404
-  );
-}
 
 const InputSchema = {
   application: z

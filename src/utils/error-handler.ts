@@ -22,6 +22,17 @@ function isAxiosError(error: unknown): error is AxiosLikeError {
 }
 
 /**
+ * Returns true if the error is an Axios 404 response.
+ * Used by tools that fall back to alternate endpoints on 404.
+ */
+export function isAxios404(error: unknown): boolean {
+  return (
+    isAxiosError(error) &&
+    error.response?.status === 404
+  );
+}
+
+/**
  * Convert any error into a structured MCP tool error response.
  * Provides actionable messages for common HTTP status codes.
  */

@@ -8,45 +8,20 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { appdGet } from "../services/api-client.js";
 import { resolveAppId } from "../utils/app-resolver.js";
-import { handleError, textResponse } from "../utils/error-handler.js";
+import { handleError, textResponse, isAxios404 } from "../utils/error-handler.js";
 import { truncateIfNeeded, formatTimestamp } from "../utils/formatting.js";
+import {
+  DIAG_ERROR_EVENT_TYPES,
+  DIAG_ANOMALY_EVENT_TYPES,
+  DIAG_EVENT_SEVERITIES,
+} from "../constants.js";
 import type {
   HealthRuleViolation,
   AppDEvent,
   BusinessTransaction,
 } from "../types.js";
 
-// ── Constants ────────────────────────────────────────────────────────────────
-
-const DIAG_ERROR_EVENT_TYPES = [
-  "APPLICATION_ERROR",
-  "APPLICATION_CRASH",
-  "STALL",
-  "SLOW_RESPONSE_TIME",
-  "DEADLOCK",
-  "GC_DURATION_VIOLATION",
-  "MEMORY_VIOLATION",
-  "CODE_PROBLEM",
-].join(",");
-
-const DIAG_ANOMALY_EVENT_TYPES = [
-  "ANOMALY_OPEN_WARNING",
-  "ANOMALY_OPEN_CRITICAL",
-].join(",");
-
-const DIAG_EVENT_SEVERITIES = "ERROR,WARN";
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function isAxios404(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "isAxiosError" in error &&
-    "response" in error &&
-    (error as Error & { response?: { status: number } }).response?.status ===
-      404
-  );
-}
 
 function normalizeViolations(data: unknown): HealthRuleViolation[] {
   if (Array.isArray(data)) return data;
@@ -65,6 +40,57 @@ function normalizeViolations(data: unknown): HealthRuleViolation[] {
     }
   }
   return [];
+}
+
+/**
+ * Convert a Promise.allSettled rejection reason to a human-readable string
+ * suitable for the dataFetchWarnings array.
+ */
+function extractErrorMessage(reason: unknown): string {
+  if (reason instanceof Error) {
+    const axiosLike = reason as Error & {
+      isAxiosError?: boolean;
+      response?: { status: number };
+      code?: string;
+    };
+    if (axiosLike.isAxiosError) {
+      const status = axiosLike.response?.status;
+      if (status === 401) return "authentication failed (401) — check API client credentials";
+      if (status === 403) return "permission denied (403) — check API client permissions";
+      if (status === 404) return "endpoint not found (404) — feature may not be enabled";
+      if (status === 429) return "rate limit exceeded (429)";
+      if (status) return `HTTP error (${status})`;
+      if (axiosLike.code === "ECONNABORTED") return "request timed out";
+      if (axiosLike.code === "ECONNREFUSED" || axiosLike.code === "ENOTFOUND")
+        return "cannot reach controller";
+      return `network error: ${reason.message}`;
+    }
+    return reason.message;
+  }
+  return String(reason);
+}
+
+/**
+ * Extract the ~10 diagnostic fields from a raw snapshot object,
+ * discarding the 40+ fields that add noise without aiding diagnosis.
+ */
+function summarizeSnapshot(snap: unknown): Record<string, unknown> {
+  if (!snap || typeof snap !== "object") return { raw: snap };
+  const s = snap as Record<string, unknown>;
+  return {
+    requestGUID: s["requestGUID"] ?? s["guid"] ?? undefined,
+    businessTransaction: s["businessTransactionId"] ?? s["businessTransaction"] ?? undefined,
+    tier: s["applicationComponentName"] ?? s["tierName"] ?? s["tier"] ?? undefined,
+    node: s["applicationComponentNodeName"] ?? s["nodeName"] ?? s["node"] ?? undefined,
+    responseTimeMs: s["timeTakenInMilliSecs"] ?? s["responseTime"] ?? undefined,
+    userExperience: s["userExperience"] ?? undefined,
+    errorOccurred: s["errorOccurred"] ?? undefined,
+    errorDetails: s["errorDetails"] ?? s["errorMessage"] ?? undefined,
+    url: s["url"] ?? s["httpUrl"] ?? undefined,
+    startTime: s["serverStartTime"] != null
+      ? formatTimestamp(s["serverStartTime"] as number)
+      : undefined,
+  };
 }
 
 /** Normalize the entity key used to group issues by affected entity. */
@@ -243,36 +269,55 @@ Returns: A structured diagnostic report with summary, ranked root cause candidat
             : Promise.resolve([] as BusinessTransaction[]),
         ]);
 
-        // ── Unwrap results ─────────────────────────────────────────────────
+        // ── Unwrap results & collect data-fetch warnings ───────────────────
+
+        const dataFetchWarnings: string[] = [];
 
         const violations: HealthRuleViolation[] =
           violationsResult.status === "fulfilled"
             ? violationsResult.value
-            : [];
+            : (dataFetchWarnings.push(
+                `Health violations: ${extractErrorMessage(violationsResult.reason)}`
+              ),
+              []);
 
         const errorEvents: AppDEvent[] =
           errorEventsResult.status === "fulfilled"
             ? Array.isArray(errorEventsResult.value)
               ? errorEventsResult.value
               : []
-            : [];
+            : (dataFetchWarnings.push(
+                `Error events: ${extractErrorMessage(errorEventsResult.reason)}`
+              ),
+              []);
 
         const anomalyEvents: AppDEvent[] =
           anomalyEventsResult.status === "fulfilled"
             ? Array.isArray(anomalyEventsResult.value)
               ? anomalyEventsResult.value
               : []
-            : [];
+            : (dataFetchWarnings.push(
+                `Anomaly events: ${extractErrorMessage(anomalyEventsResult.reason)}`
+              ),
+              []);
 
         const snapshots: unknown[] =
           snapshotsResult.status === "fulfilled"
             ? Array.isArray(snapshotsResult.value)
               ? snapshotsResult.value
               : []
-            : [];
+            : (dataFetchWarnings.push(
+                `Snapshots: ${extractErrorMessage(snapshotsResult.reason)}`
+              ),
+              []);
 
         const bts: BusinessTransaction[] =
-          btsResult.status === "fulfilled" ? btsResult.value : [];
+          btsResult.status === "fulfilled"
+            ? btsResult.value
+            : (dataFetchWarnings.push(
+                `Business transactions: ${extractErrorMessage(btsResult.reason)}`
+              ),
+              []);
 
         // ── Correlation ────────────────────────────────────────────────────
 
@@ -328,8 +373,11 @@ Returns: A structured diagnostic report with summary, ranked root cause candidat
             ev.affectedEntityName
           );
           rec.issueCount++;
-          rec.otherCount++;
-          bumpSeverity(rec, ev.severity ?? "WARN");
+          const evSev = (ev.severity ?? "").toUpperCase();
+          if (evSev === "ERROR" || evSev === "CRITICAL") rec.criticalCount++;
+          else if (evSev === "WARNING" || evSev === "WARN") rec.warningCount++;
+          else rec.otherCount++;
+          bumpSeverity(rec, evSev || "WARN");
           rec.evidence.push(`${ev.type} event`);
 
           // Extract error class from summary for error breakdown
@@ -544,11 +592,15 @@ Returns: A structured diagnostic report with summary, ranked root cause candidat
           );
         }
 
+        // ── Summarize snapshots ────────────────────────────────────────────
+        const summarizedSnapshots = snapshots.map(summarizeSnapshot);
+
         // ── Assemble report ────────────────────────────────────────────────
         const report = {
           summary,
           timeWindow: `Last ${duration} minutes`,
           ...(issueStartedAround ? { issueStartedAround } : {}),
+          ...(dataFetchWarnings.length > 0 ? { dataFetchWarnings } : {}),
           topRootCauseCandidates: ranked,
           healthViolations: violations,
           anomalies: anomalyEvents,
@@ -559,7 +611,10 @@ Returns: A structured diagnostic report with summary, ranked root cause candidat
             nodes: [...affectedNodes],
           },
           timeline: trimmedTimeline,
-          diagnosticSnapshots: snapshots,
+          diagnosticSnapshots: summarizedSnapshots,
+          snapshotNote: summarizedSnapshots.length > 0
+            ? "Snapshots show key fields only. Use appd_get_snapshots for full call stack and SQL detail."
+            : undefined,
           investigationSteps: steps,
         };
 
