@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## Project Overview
 
-AppDynamics MCP Server — a Model Context Protocol server that exposes AppDynamics SaaS REST API data to MCP-compatible clients (Cursor, Claude Desktop, etc.). Provides 20 tools covering application monitoring, diagnostics, metric browsing, full dashboard CRUD, and automated root cause analysis.
+AppDynamics MCP Server — a Model Context Protocol server that exposes AppDynamics SaaS REST API data to MCP-compatible clients (Cursor, Claude Desktop, etc.). Provides 23 tools covering application monitoring, diagnostics, metric browsing, full dashboard CRUD, auto-build dashboards, dashboard import/export/file-save, and automated root cause analysis.
 
 ## Running
 
@@ -44,7 +44,8 @@ src/
     ├── metrics.ts             # appd_get_metric_data, appd_browse_metric_tree
     ├── dashboards.ts          # appd_get_dashboards, appd_get_dashboard, appd_create_dashboard,
     │                          # appd_update_dashboard, appd_add_widget_to_dashboard,
-    │                          # appd_clone_dashboard, appd_delete_dashboard, appd_export_dashboard
+    │                          # appd_clone_dashboard, appd_delete_dashboard, appd_export_dashboard,
+    │                          # appd_auto_build_dashboard
     └── root-cause.ts          # appd_diagnose_issue
 ```
 
@@ -64,7 +65,7 @@ src/
 - Token cached with 5-minute safety margin before expiry
 - **Fallback**: Direct API key if only `APPD_CLIENT_NAME` is set (no secret)
 
-### Tools Summary (20 total)
+### Tools Summary (23 total)
 
 | Category | Tools |
 |---|---|
@@ -75,7 +76,7 @@ src/
 | Diagnostics | `appd_get_snapshots`, `appd_get_errors` |
 | Diagnostics+ | `appd_diagnose_issue` |
 | Metrics | `appd_get_metric_data`, `appd_browse_metric_tree` |
-| Dashboards | `appd_get_dashboards`, `appd_get_dashboard`, `appd_create_dashboard`, `appd_update_dashboard`, `appd_add_widget_to_dashboard`, `appd_clone_dashboard`, `appd_delete_dashboard`, `appd_export_dashboard` |
+| Dashboards | `appd_get_dashboards`, `appd_get_dashboard`, `appd_create_dashboard`, `appd_update_dashboard`, `appd_add_widget_to_dashboard`, `appd_clone_dashboard`, `appd_delete_dashboard`, `appd_export_dashboard`, `appd_import_dashboard`, `appd_save_dashboard_file`, `appd_auto_build_dashboard` |
 
 ## Environment Variables
 

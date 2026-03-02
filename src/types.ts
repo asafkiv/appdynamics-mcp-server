@@ -126,6 +126,47 @@ export interface Backend {
   [key: string]: unknown;
 }
 
+// ── Root Cause Analysis Phase 2 summaries ───────────────────────────────────
+
+export interface TierMetricSummary {
+  tierName: string;
+  avgResponseMs: number | null;
+  baselineAvgResponseMs: number | null;   // prior equivalent window
+  responseChangePct: number | null;       // % change vs baseline (positive = worse)
+  errorsPerMin: number | null;
+  baselineErrorsPerMin: number | null;
+  errorsChangePct: number | null;
+  isSlowResponse: boolean;                // responseChangePct > BASELINE_DEGRADATION_PCT
+  hasNewErrors: boolean;                  // errors increased significantly vs baseline
+}
+
+export interface BackendMetricSummary {
+  name: string;
+  type: string;
+  avgResponseMs: number | null;
+  baselineAvgResponseMs: number | null;
+  responseChangePct: number | null;
+  errorsPerMin: number | null;
+  baselineErrorsPerMin: number | null;
+  isSlow: boolean;                        // responseChangePct > BASELINE_DEGRADATION_PCT
+}
+
+export interface InfraNodeSummary {
+  tierName: string;
+  nodeName: string;
+  cpuPercent: number | null;
+  baselineCpuPercent: number | null;
+  cpuChangePct: number | null;
+  heapUsedMb: number | null;
+  baselineHeapUsedMb: number | null;
+  gcTimeMs: number | null;
+  baselineGcTimeMs: number | null;
+  gcChangePct: number | null;
+  isCpuSaturated: boolean;               // cpuChangePct > BASELINE_DEGRADATION_PCT
+  isHeapPressure: boolean;               // heap increased significantly vs baseline
+  hasGcPressure: boolean;                // gcChangePct > BASELINE_DEGRADATION_PCT
+}
+
 // ── Service Endpoints ───────────────────────────────────────────────────────
 
 export interface ServiceEndpoint {

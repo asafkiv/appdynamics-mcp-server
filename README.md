@@ -4,7 +4,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives L
 
 ## Features
 
-**20 tools** across 7 categories:
+**23 tools** across 7 categories:
 
 - **Discovery**: List and search applications by name
 - **Health Monitoring**: Health rules, violations, and anomaly detection
@@ -152,6 +152,9 @@ Required variables:
 | `appd_clone_dashboard` | Clone a dashboard with a new name |
 | `appd_delete_dashboard` | Delete a dashboard (permanent) |
 | `appd_export_dashboard` | Export dashboard as portable JSON |
+| `appd_import_dashboard` | Create a new dashboard from a saved JSON definition (reverse of export) |
+| `appd_save_dashboard_file` | Build a complete dashboard JSON file locally (with all widget payloads) without creating anything in AppDynamics — ready to edit and import |
+| `appd_auto_build_dashboard` | Auto-discover tiers, BTs, and health rules, then create a complete multi-section dashboard (Dash Studio–style) |
 
 ## Example Conversations
 

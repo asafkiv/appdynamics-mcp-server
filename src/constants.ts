@@ -65,6 +65,26 @@ export const WIDGET_TYPES = {
   ANALYTICS: "ANALYTICS",
 } as const;
 
+// ── Phase 2 baseline comparison ─────────────────────────────────────────────
+// Percentage degradation vs prior equivalent window to flag as anomalous.
+// "50" means current must be 50% worse than baseline to be flagged.
+export const BASELINE_DEGRADATION_PCT = 50;
+
+// Percentage degradation to flag as critical (used in scoring boost weight).
+export const BASELINE_CRITICAL_PCT = 100;
+
+// Minimum baseline value for response time (ms) to make a meaningful comparison.
+// Prevents false positives when baseline is trivially small (e.g., 2ms → 4ms = 100% but not a real problem).
+export const BASELINE_MIN_RESPONSE_MS = 20;
+
+// Minimum baseline errors/min below which any non-zero current value is treated as "new errors".
+export const BASELINE_MIN_ERRORS_PER_MIN = 0.5;
+
+// Phase 2 fetch caps (prevent runaway API calls)
+export const DIAG_MAX_TIERS_PHASE2 = 3;
+export const DIAG_MAX_BACKENDS_PHASE2 = 10;
+export const DIAG_MAX_NODES_PER_TIER_PHASE2 = 2;
+
 // Common BT performance metric names
 export const BT_METRICS = [
   "Average Response Time (ms)",
