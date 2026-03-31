@@ -43,7 +43,7 @@ npm install
 3. Create a new API Client with the following:
    - **Client Name**: Your chosen client name (e.g., `mcpV2`)
    - **Client Secret**: Generated secret (save this securely)
-   - **Account Name**: Your AppDynamics account name (if required)
+   - **Account Name**: Your AppDynamics account name (`sammons-test`)
 
 ### MCP Configuration (Cursor)
 
